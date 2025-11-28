@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, ExternalLink, Save, Trash2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { toast } from 'sonner'
+import ConfirmationModal from '../components/ConfirmationModal'
 
 export default function ProductDetail() {
   const { id } = useParams()
@@ -9,7 +11,9 @@ export default function ProductDetail() {
   const [product, setProduct] = useState(null)
   const [loading, setLoading] = useState(true)
   const [targetPrice, setTargetPrice] = useState('')
+  const [monitoringUntil, setMonitoringUntil] = useState('')
   const [saving, setSaving] = useState(false)
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
 
   useEffect(() => {
     fetchProduct()
@@ -26,6 +30,7 @@ export default function ProductDetail() {
       if (error) throw error
       setProduct(data)
       setTargetPrice(data.target_price || '')
+      setMonitoringUntil(data.monitoring_until || '')
     } catch (error) {
       console.error('Error fetching product:', error)
       navigate('/')
@@ -39,21 +44,23 @@ export default function ProductDetail() {
     try {
       const { error } = await supabase
         .from('products')
-        .update({ target_price: targetPrice ? parseFloat(targetPrice) : null })
+        .update({ 
+          target_price: targetPrice ? parseFloat(targetPrice) : null,
+          monitoring_until: monitoringUntil || null
+        })
         .eq('id', id)
       
       if (error) throw error
-      alert('Settings saved!')
+      toast.success('Settings saved!')
     } catch (error) {
       console.error('Error saving settings:', error)
-      alert('Failed to save settings')
+      toast.error('Failed to save settings')
     } finally {
       setSaving(false)
     }
   }
 
   const handleDelete = async () => {
-    if (!confirm('Are you sure you want to delete this product?')) return
     
     try {
       const { error } = await supabase.from('products').delete().eq('id', id)
@@ -127,6 +134,17 @@ export default function ProductDetail() {
                   <p className="text-xs text-gray-500 mt-2">We'll notify you when the price drops below this amount.</p>
                 </div>
 
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-2">Monitor Until</label>
+                  <input
+                    type="date"
+                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                    value={monitoringUntil}
+                    onChange={(e) => setMonitoringUntil(e.target.value)}
+                  />
+                  <p className="text-xs text-gray-500 mt-2">Stop tracking this product after this date.</p>
+                </div>
+
                 <div className="flex gap-3 pt-4">
                   <button
                     onClick={handleSaveSettings}
@@ -137,7 +155,7 @@ export default function ProductDetail() {
                     {saving ? 'Saving...' : 'Save Settings'}
                   </button>
                   <button
-                    onClick={handleDelete}
+                    onClick={() => setIsDeleteModalOpen(true)}
                     className="px-4 py-3 bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/50 rounded-lg transition-colors"
                   >
                     <Trash2 size={20} />
@@ -147,6 +165,16 @@ export default function ProductDetail() {
             </div>
           </div>
         </div>
+
+        <ConfirmationModal
+          isOpen={isDeleteModalOpen}
+          onClose={() => setIsDeleteModalOpen(false)}
+          onConfirm={handleDelete}
+          title="Delete Product"
+          message="Are you sure you want to delete this product? This action cannot be undone."
+          confirmText="Delete"
+          isDanger
+        />
       </div>
     </div>
   )

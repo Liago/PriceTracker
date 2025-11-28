@@ -5,7 +5,10 @@ import Login from './pages/Login'
 import Signup from './pages/Signup'
 import Dashboard from './pages/Dashboard'
 import ProductDetail from './pages/ProductDetail'
+import Settings from './pages/Settings'
 import ProtectedRoute from './components/ProtectedRoute'
+
+import { Toaster } from 'sonner'
 
 const queryClient = new QueryClient()
 
@@ -13,14 +16,14 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <Toaster position="top-center" richColors theme="dark" />
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
-            <Route element={<ProtectedRoute />}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/product/:id" element={<ProductDetail />} />
-            </Route>
+            <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/product/:id" element={<ProtectedRoute><ProductDetail /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>
