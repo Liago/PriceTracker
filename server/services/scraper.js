@@ -3,14 +3,32 @@ const chromium = require('@sparticuz/chromium');
 
 async function scrapeProduct(url) {
 	try {
-		// Configure browser for Serverless (Netlify/Lambda)
-		const browser = await puppeteer.launch({
-			args: chromium.args,
-			defaultViewport: chromium.defaultViewport,
-			executablePath: process.env.CHROME_EXECUTABLE_PATH || await chromium.executablePath(),
-			headless: chromium.headless,
-			ignoreHTTPSErrors: true,
-		});
+		let browser;
+
+		// Check if running on Netlify/Lambda
+		const isProduction = process.env.AWS_LAMBDA_FUNCTION_VERSION || process.env.NETLIFY;
+
+		if (isProduction) {
+			// Production: Use @sparticuz/chromium
+			browser = await puppeteer.launch({
+				args: chromium.args,
+				defaultViewport: chromium.defaultViewport,
+				executablePath: process.env.CHROME_EXECUTABLE_PATH || await chromium.executablePath(),
+				headless: chromium.headless,
+				ignoreHTTPSErrors: true,
+			});
+		} else {
+			// Local Development: Use local Chrome
+			// Try to find Chrome on macOS
+			const localExecutablePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+
+			browser = await puppeteer.launch({
+				channel: 'chrome',
+				executablePath: localExecutablePath,
+				headless: 'new',
+				args: ['--no-sandbox', '--disable-setuid-sandbox']
+			});
+		}
 
 		const page = await browser.newPage();
 
