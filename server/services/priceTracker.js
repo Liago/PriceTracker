@@ -1,5 +1,4 @@
 const { createClient } = require('@supabase/supabase-js');
-const puppeteer = require('puppeteer');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
@@ -30,92 +29,7 @@ async function getUserSettings(userId) {
 }
 
 // Import scraping logic (we'll extract it)
-async function scrapeProductPrice(url) {
-	try {
-		const browser = await puppeteer.launch({
-			headless: 'new',
-			args: ['--no-sandbox', '--disable-setuid-sandbox']
-		});
-		const page = await browser.newPage();
-
-		await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
-		await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-
-		const data = await page.evaluate((url) => {
-			const getMeta = (name) => {
-				const element = document.querySelector(`meta[property="${name}"]`) || document.querySelector(`meta[name="${name}"]`);
-				return element ? element.content : null;
-			};
-
-			const isAmazon = url.includes('amazon.');
-
-			let title = getMeta('og:title') || document.title;
-			if (isAmazon) {
-				const titleElement = document.querySelector('#productTitle');
-				if (titleElement) {
-					title = titleElement.textContent.trim();
-				} else {
-					title = title.replace(/\s*:\s*Amazon\.(it|com|co\.uk|de|fr|es).*$/i, '');
-				}
-			}
-
-			let image = getMeta('og:image');
-			if (isAmazon && !image) {
-				const imgElement = document.querySelector('#landingImage, #imgBlkFront, #ebooksImgBlkFront');
-				if (imgElement) {
-					image = imgElement.src || imgElement.getAttribute('data-old-hires') || imgElement.getAttribute('data-a-dynamic-image');
-					if (image && image.startsWith('{')) {
-						try {
-							const imgData = JSON.parse(image);
-							image = Object.keys(imgData)[0];
-						} catch (e) {
-							image = null;
-						}
-					}
-				}
-			}
-
-			const description = getMeta('og:description');
-
-			let price = getMeta('product:price:amount') || getMeta('og:price:amount');
-			let currency = getMeta('product:price:currency') || getMeta('og:price:currency') || 'EUR';
-
-			if (isAmazon && !price) {
-				const priceSelectors = [
-					'.a-price .a-offscreen',
-					'#priceblock_ourprice',
-					'#priceblock_dealprice',
-					'.a-price-whole',
-					'#corePrice_feature_div .a-price .a-offscreen'
-				];
-
-				for (const selector of priceSelectors) {
-					const priceElement = document.querySelector(selector);
-					if (priceElement) {
-						price = priceElement.textContent.trim();
-						break;
-					}
-				}
-			}
-
-			if (!price) {
-				const priceRegex = /[\$€£]\s*\d+([.,]\d{2,3})?|\d+([.,]\d{2,3})?\s*[\$€£]/;
-				const elements = document.body.innerText.match(priceRegex);
-				if (elements) {
-					price = elements[0];
-				}
-			}
-
-			return { title, image, description, price, currency };
-		}, url);
-
-		await browser.close();
-		return data;
-	} catch (error) {
-		console.error('Scraping error:', error);
-		throw error;
-	}
-}
+const { scrapeProduct } = require('./scraper');
 
 function parsePrice(priceStr, currency) {
 	if (!priceStr) return 0;
@@ -211,7 +125,7 @@ async function checkProductPrices() {
 					console.log(`[Price Tracker] Checking: ${product.name} (Last check: ${lastChecked.toISOString()})`);
 
 					// Scrape current price
-					const scrapedData = await scrapeProductPrice(product.url);
+					const scrapedData = await scrapeProduct(product.url);
 					const newPrice = parsePrice(scrapedData.price, scrapedData.currency);
 
 					if (!newPrice || newPrice === 0) {

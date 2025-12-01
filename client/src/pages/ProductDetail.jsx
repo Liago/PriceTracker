@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, ExternalLink, Save, Trash2 } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Save, Trash2, RefreshCw } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { toast } from 'sonner'
 import ConfirmationModal from '../components/ConfirmationModal'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
+import { scrapeProduct } from '../lib/api'
+import { parsePrice } from '../lib/utils'
 
 export default function ProductDetail() {
   const { id } = useParams()
@@ -12,6 +14,7 @@ export default function ProductDetail() {
   const [product, setProduct] = useState(null)
   const [priceHistory, setPriceHistory] = useState([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [targetPrice, setTargetPrice] = useState('')
   const [monitoringUntil, setMonitoringUntil] = useState('')
   const [saving, setSaving] = useState(false)
@@ -64,6 +67,57 @@ export default function ProductDetail() {
       if (!product) navigate('/')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleRefresh = async () => {
+    if (!product?.url) return
+    setRefreshing(true)
+    
+    try {
+      // 1. Scrape fresh data
+      const data = await scrapeProduct(product.url)
+      const newPrice = parsePrice(data.price, data.currency)
+      const oldPrice = product.current_price
+      const priceChanged = Math.abs(newPrice - oldPrice) > 0.01
+
+      // 2. Update product in DB
+      const { error: updateError } = await supabase
+        .from('products')
+        .update({
+          current_price: newPrice,
+          store: data.store,
+          details: data.details,
+          image: data.image, // Update image if changed
+          last_checked_at: new Date().toISOString()
+        })
+        .eq('id', id)
+
+      if (updateError) throw updateError
+
+      // 3. If price changed, add to history
+      if (priceChanged) {
+        const { error: historyError } = await supabase
+          .from('price_history')
+          .insert({
+            product_id: id,
+            price: newPrice
+          })
+        
+        if (historyError) throw historyError
+        toast.success(`Price updated! ${oldPrice} -> ${newPrice}`)
+      } else {
+        toast.success('Product data refreshed!')
+      }
+
+      // 4. Reload data
+      fetchProductAndHistory()
+
+    } catch (error) {
+      console.error('Error refreshing product:', error)
+      toast.error('Failed to refresh product data')
+    } finally {
+      setRefreshing(false)
     }
   }
 
@@ -124,6 +178,19 @@ export default function ProductDetail() {
             
             <div className="space-y-6">
               <div>
+                <div className="flex justify-between items-start mb-4">
+                  <span className="text-xs font-medium px-2 py-1 bg-gray-700 rounded text-gray-300 uppercase tracking-wider">
+                    {product.store || 'Unknown Store'}
+                  </span>
+                  <button
+                    onClick={handleRefresh}
+                    disabled={refreshing}
+                    className={`p-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-white transition-all ${refreshing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    title="Refresh Data"
+                  >
+                    <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
+                  </button>
+                </div>
                 <h1 className="text-2xl font-bold mb-2">{product.name}</h1>
                 <a
                   href={product.url}
@@ -135,11 +202,32 @@ export default function ProductDetail() {
                 </a>
               </div>
 
+              {/* Product Details / Features */}
+              {product.details?.features && product.details.features.length > 0 && (
+                <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+                  <h3 className="text-sm font-semibold text-gray-300 mb-2">Key Features</h3>
+                  <ul className="list-disc list-inside text-sm text-gray-400 space-y-1">
+                    {product.details.features.map((feature, index) => (
+                      <li key={index}>{feature}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <div className="bg-gray-700/50 p-6 rounded-lg border border-gray-600">
-                <p className="text-sm text-gray-400 mb-1">Current Price</p>
-                <p className="text-4xl font-bold text-white">
-                  {product.currency} {product.current_price}
-                </p>
+                <div className="flex justify-between items-end">
+                  <div>
+                    <p className="text-sm text-gray-400 mb-1">Current Price</p>
+                    <p className="text-4xl font-bold text-white">
+                      {product.currency} {product.current_price}
+                    </p>
+                  </div>
+                  {product.last_checked_at && (
+                    <p className="text-xs text-gray-500 mb-1">
+                      Last check: {new Date(product.last_checked_at).toLocaleString()}
+                    </p>
+                  )}
+                </div>
               </div>
 
               <div className="space-y-4">

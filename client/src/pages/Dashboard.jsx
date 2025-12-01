@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { Plus, Trash2, ExternalLink, LayoutGrid, List } from 'lucide-react'
+import { Plus, Trash2, ExternalLink, LayoutGrid, List, Search, Filter, ArrowUpDown } from 'lucide-react'
 import AddProductModal from '../components/AddProductModal'
 import ConfirmationModal from '../components/ConfirmationModal'
 import { scrapeProduct } from '../lib/api'
@@ -15,6 +15,11 @@ export default function Dashboard() {
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [deleteProductId, setDeleteProductId] = useState(null)
+
+  // Filter & Sort State
+  const [searchTerm, setSearchTerm] = useState('')
+  const [selectedStore, setSelectedStore] = useState('all')
+  const [sortBy, setSortBy] = useState('date-desc')
 
   useEffect(() => {
     fetchProducts()
@@ -49,7 +54,9 @@ export default function Dashboard() {
         image: data.image,
         description: data.description,
         current_price: parsePrice(data.price, data.currency),
-        currency: data.currency
+        currency: data.currency,
+        store: data.store,
+        details: data.details
       }
     ])
 
@@ -66,57 +73,160 @@ export default function Dashboard() {
     }
   }
 
+  // Derived State: Unique Stores
+  const uniqueStores = useMemo(() => {
+    const stores = products.map(p => p.store).filter(Boolean)
+    return ['all', ...new Set(stores)]
+  }, [products])
+
+  // Derived State: Filtered & Sorted Products
+  const filteredProducts = useMemo(() => {
+    let result = [...products]
+
+    // 1. Search
+    if (searchTerm) {
+      const lowerTerm = searchTerm.toLowerCase()
+      result = result.filter(p => 
+        p.name?.toLowerCase().includes(lowerTerm) || 
+        p.store?.toLowerCase().includes(lowerTerm)
+      )
+    }
+
+    // 2. Store Filter
+    if (selectedStore !== 'all') {
+      result = result.filter(p => p.store === selectedStore)
+    }
+
+    // 3. Sort
+    result.sort((a, b) => {
+      switch (sortBy) {
+        case 'date-desc':
+          return new Date(b.created_at) - new Date(a.created_at)
+        case 'date-asc':
+          return new Date(a.created_at) - new Date(b.created_at)
+        case 'price-asc':
+          return a.current_price - b.current_price
+        case 'price-desc':
+          return b.current_price - a.current_price
+        case 'name-asc':
+          return (a.name || '').localeCompare(b.name || '')
+        default:
+          return 0
+      }
+    })
+
+    return result
+  }, [products, searchTerm, selectedStore, sortBy])
+
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <div className="max-w-7xl mx-auto">
-        <div className="flex justify-between items-center mb-8">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
           <h1 className="text-3xl font-bold">Dashboard</h1>
-          <div className="flex items-center gap-4">
-            <div className="flex bg-gray-800 rounded-lg p-1 border border-gray-700">
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`p-2 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}
-              >
-                <LayoutGrid size={20} />
-              </button>
-              <button
-                onClick={() => setViewMode('list')}
-                className={`p-2 rounded-md transition-colors ${viewMode === 'list' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}
-              >
-                <List size={20} />
-              </button>
-            </div>
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2 transition-colors"
-            >
-              <Plus size={20} />
-              <span className="hidden sm:inline">Add Product</span>
-            </button>
-            <div className="h-8 w-px bg-gray-700"></div>
-            <span className="text-gray-400 hidden sm:inline">{user?.email}</span>
+          
+          <div className="flex flex-wrap items-center gap-4 w-full md:w-auto">
+            <span className="text-gray-400 hidden md:inline">{user?.email}</span>
             <Link
               to="/settings"
-              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors text-sm"
             >
               Settings
             </Link>
             <button
               onClick={() => signOut()}
-              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors text-sm"
             >
               Sign Out
             </button>
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2 transition-colors text-sm ml-auto md:ml-0"
+            >
+              <Plus size={18} />
+              <span className="hidden sm:inline">Add Product</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Toolbar: Search & Filters */}
+        <div className="bg-gray-800 rounded-xl p-4 mb-8 border border-gray-700 flex flex-col md:flex-row gap-4 items-center justify-between">
+          
+          {/* Search */}
+          <div className="relative w-full md:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <input
+              type="text"
+              placeholder="Search products..."
+              className="w-full pl-10 pr-4 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-sm"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+
+          <div className="flex flex-wrap gap-3 w-full md:w-auto">
+            {/* Store Filter */}
+            <div className="relative flex-1 md:flex-none">
+              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+              <select
+                className="w-full md:w-40 pl-10 pr-8 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-sm appearance-none cursor-pointer"
+                value={selectedStore}
+                onChange={(e) => setSelectedStore(e.target.value)}
+              >
+                <option value="all">All Stores</option>
+                {uniqueStores.filter(s => s !== 'all').map(store => (
+                  <option key={store} value={store}>{store}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Sort */}
+            <div className="relative flex-1 md:flex-none">
+              <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+              <select
+                className="w-full md:w-48 pl-10 pr-8 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-sm appearance-none cursor-pointer"
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+              >
+                <option value="date-desc">Newest First</option>
+                <option value="date-asc">Oldest First</option>
+                <option value="price-asc">Price: Low to High</option>
+                <option value="price-desc">Price: High to Low</option>
+                <option value="name-asc">Name: A-Z</option>
+              </select>
+            </div>
+
+            {/* View Toggle */}
+            <div className="flex bg-gray-900 rounded-lg p-1 border border-gray-600">
+              <button
+                onClick={() => setViewMode('grid')}
+                className={`p-1.5 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}
+                title="Grid View"
+              >
+                <LayoutGrid size={18} />
+              </button>
+              <button
+                onClick={() => setViewMode('list')}
+                className={`p-1.5 rounded-md transition-colors ${viewMode === 'list' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}
+                title="List View"
+              >
+                <List size={18} />
+              </button>
+            </div>
           </div>
         </div>
         
+        {/* Product Grid/List */}
         <div className={`grid gap-6 ${viewMode === 'grid' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
-          {products.length === 0 ? (
+          {filteredProducts.length === 0 ? (
             <div className="col-span-full bg-gray-800 rounded-xl p-8 border border-gray-700 text-center">
-              <p className="text-gray-400 py-12">No products tracked yet. Click "Add Product" to start.</p>
+              <p className="text-gray-400 py-12">
+                {products.length === 0 
+                  ? 'No products tracked yet. Click "Add Product" to start.' 
+                  : 'No products match your filters.'}
+              </p>
             </div>
           ) : (
-            products.map((product) => (
+            filteredProducts.map((product) => (
               <div key={product.id} className={`bg-gray-800 rounded-xl overflow-hidden border border-gray-700 hover:border-blue-500 transition-colors group relative ${viewMode === 'list' ? 'flex flex-row-reverse' : ''}`}>
                 <Link to={`/product/${product.id}`} className={`block w-full ${viewMode === 'list' ? 'flex flex-row-reverse items-center justify-between p-4' : ''}`}>
                   <div className={`aspect-video bg-gray-900 relative overflow-hidden ${viewMode === 'list' ? 'w-32 h-24 rounded-lg shrink-0 ml-4' : ''}`}>
@@ -127,6 +237,11 @@ export default function Dashboard() {
                     )}
                   </div>
                   <div className={`${viewMode === 'list' ? 'flex-1 min-w-0' : 'p-4'}`}>
+                    <div className="mb-2">
+                      <span className="text-xs font-medium px-2 py-1 bg-gray-700 rounded text-gray-300 uppercase tracking-wider">
+                        {product.store || 'Unknown Store'}
+                      </span>
+                    </div>
                     <h3 className={`font-semibold text-white mb-2 line-clamp-2 ${viewMode === 'list' ? 'text-lg' : ''}`} title={product.name}>{product.name || 'Untitled Product'}</h3>
                     <div className={`${viewMode === 'list' ? 'flex gap-6' : 'space-y-3'}`}>
                       <div>
