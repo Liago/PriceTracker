@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, ExternalLink, Save, Trash2, RefreshCw } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Save, Trash2, RefreshCw, List } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { toast } from 'sonner'
 import ConfirmationModal from '../components/ConfirmationModal'
@@ -166,110 +166,113 @@ export default function ProductDetail() {
           Back to Dashboard
         </button>
 
-        <div className="bg-gray-800 rounded-xl overflow-hidden border border-gray-700 shadow-2xl mb-8">
+        <div className="bg-gray-800/50 backdrop-blur-xl rounded-3xl overflow-hidden border border-gray-700/50 shadow-2xl mb-8">
           <div className="grid md:grid-cols-2 gap-8 p-8">
-            <div className="aspect-square bg-gray-900 rounded-lg overflow-hidden relative flex items-center justify-center">
+            {/* Left Column: Image */}
+            <div className="flex items-center justify-center bg-white/5 rounded-2xl p-8 shadow-inner">
               {product.image ? (
-                <img src={product.image} alt={product.name} className="w-full h-full object-contain" />
+                <img 
+                  src={product.image} 
+                  alt={product.name} 
+                  className="w-full h-auto max-h-[500px] object-contain drop-shadow-2xl hover:scale-105 transition-transform duration-300" 
+                />
               ) : (
                 <div className="text-gray-600">No Image</div>
               )}
             </div>
             
-            <div className="space-y-6">
+            {/* Right Column: Info & Actions */}
+            <div className="space-y-8 flex flex-col justify-center">
               <div>
                 <div className="flex justify-between items-start mb-4">
-                  <span className="text-xs font-medium px-2 py-1 bg-gray-700 rounded text-gray-300 uppercase tracking-wider">
+                  <span className="badge badge-primary badge-lg uppercase tracking-wider font-bold">
                     {product.store || 'Unknown Store'}
                   </span>
                   <button
                     onClick={handleRefresh}
                     disabled={refreshing}
-                    className={`p-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-white transition-all ${refreshing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    className={`btn btn-circle btn-ghost btn-sm ${refreshing ? 'loading' : ''}`}
                     title="Refresh Data"
                   >
-                    <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
+                    {!refreshing && <RefreshCw size={18} />}
                   </button>
                 </div>
-                <h1 className="text-2xl font-bold mb-2">{product.name}</h1>
+                <h1 className="text-3xl md:text-4xl font-extrabold mb-4 leading-tight bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
+                  {product.name}
+                </h1>
                 <a
                   href={product.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-400 hover:text-blue-300 flex items-center gap-2 text-sm"
+                  className="btn btn-link text-blue-400 hover:text-blue-300 no-underline pl-0 flex items-center gap-2"
                 >
-                  View on Store <ExternalLink size={14} />
+                  View on Store <ExternalLink size={16} />
                 </a>
               </div>
 
-              {/* Product Details / Features */}
-              {product.details?.features && product.details.features.length > 0 && (
-                <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
-                  <h3 className="text-sm font-semibold text-gray-300 mb-2">Key Features</h3>
-                  <ul className="list-disc list-inside text-sm text-gray-400 space-y-1">
-                    {product.details.features.map((feature, index) => (
-                      <li key={index}>{feature}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              <div className="bg-gray-700/50 p-6 rounded-lg border border-gray-600">
-                <div className="flex justify-between items-end">
-                  <div>
-                    <p className="text-sm text-gray-400 mb-1">Current Price</p>
-                    <p className="text-4xl font-bold text-white">
-                      {product.currency} {product.current_price}
-                    </p>
+              <div className="stats shadow bg-gray-700/30 border border-gray-600/30 backdrop-blur-md">
+                <div className="stat">
+                  <div className="stat-title text-gray-400">Current Price</div>
+                  <div className="stat-value text-primary text-4xl md:text-5xl">
+                    {product.currency} {product.current_price}
                   </div>
                   {product.last_checked_at && (
-                    <p className="text-xs text-gray-500 mb-1">
+                    <div className="stat-desc text-gray-500 mt-1">
                       Last check: {new Date(product.last_checked_at).toLocaleString()}
-                    </p>
+                    </div>
                   )}
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <h3 className="text-lg font-semibold">Monitoring Settings</h3>
+              <div className="card bg-base-200/50 border border-white/5 p-6 rounded-2xl space-y-4">
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                  <span className="w-1 h-6 bg-blue-500 rounded-full"></span>
+                  Monitoring Settings
+                </h3>
                 
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Target Price</label>
-                  <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">{product.currency}</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="form-control">
+                    <label className="label">
+                      <span className="label-text text-gray-400">Target Price</span>
+                    </label>
+                    <label className="input input-bordered flex items-center gap-2 bg-gray-900/50 border-gray-600 focus-within:border-blue-500">
+                      <span className="text-gray-500">{product.currency}</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="grow"
+                        placeholder="0.00"
+                        value={targetPrice}
+                        onChange={(e) => setTargetPrice(e.target.value)}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="form-control">
+                    <label className="label">
+                      <span className="label-text text-gray-400">Monitor Until</span>
+                    </label>
                     <input
-                      type="number"
-                      step="0.01"
-                      className="w-full pl-12 pr-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
-                      placeholder="0.00"
-                      value={targetPrice}
-                      onChange={(e) => setTargetPrice(e.target.value)}
+                      type="date"
+                      className="input input-bordered w-full bg-gray-900/50 border-gray-600 focus-within:border-blue-500"
+                      value={monitoringUntil}
+                      onChange={(e) => setMonitoringUntil(e.target.value)}
                     />
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">Monitor Until</label>
-                  <input
-                    type="date"
-                    className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
-                    value={monitoringUntil}
-                    onChange={(e) => setMonitoringUntil(e.target.value)}
-                  />
-                </div>
-
-                <div className="flex gap-3 pt-4">
+                <div className="flex gap-3 pt-2">
                   <button
                     onClick={handleSaveSettings}
                     disabled={saving}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                    className="btn btn-primary flex-1 gap-2"
                   >
                     <Save size={20} />
                     {saving ? 'Saving...' : 'Save Settings'}
                   </button>
                   <button
                     onClick={() => setIsDeleteModalOpen(true)}
-                    className="px-4 py-3 bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/50 rounded-lg transition-colors"
+                    className="btn btn-error btn-outline"
                   >
                     <Trash2 size={20} />
                   </button>
@@ -277,6 +280,23 @@ export default function ProductDetail() {
               </div>
             </div>
           </div>
+
+          {/* Full Width Description / Features Section */}
+          {product.details?.features && product.details.features.length > 0 && (
+            <div className="border-t border-gray-700/50 bg-gray-800/30 p-8 md:p-12">
+              <h3 className="text-2xl font-bold mb-6 flex items-center gap-3">
+                <List size={24} className="text-blue-500" />
+                Key Features & Description
+              </h3>
+              <div className="prose prose-invert max-w-none">
+                <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4 text-lg text-gray-300 leading-relaxed list-disc pl-6">
+                  {product.details.features.map((feature, index) => (
+                    <li key={index} className="pl-2">{feature}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Price History Chart */}
