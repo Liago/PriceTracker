@@ -11,7 +11,7 @@ export default function Settings() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [settings, setSettings] = useState({
-    price_check_interval: 6,
+    price_check_interval: 360,
     scrape_delay: 2000,
     max_retries: 1,
     email_notifications: true
@@ -44,7 +44,7 @@ export default function Settings() {
       }
 
       setSettings({
-        price_check_interval: data.price_check_interval || 6,
+        price_check_interval: data.price_check_interval || 360,
         scrape_delay: data.scrape_delay || 2000,
         max_retries: data.max_retries || 1,
         email_notifications: data.email_notifications ?? true
@@ -101,17 +101,17 @@ export default function Settings() {
           <div className="space-y-6">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">
-                Price Check Interval (hours)
+                Price Check Interval (minutes)
               </label>
               <input
                 type="number"
                 min="1"
-                max="24"
+                max="10080"
                 className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
                 value={settings.price_check_interval}
                 onChange={(e) => setSettings({ ...settings, price_check_interval: e.target.value })}
               />
-              <p className="text-xs text-gray-500 mt-2">How often to check product prices (minimum 1 hour, maximum 24 hours)</p>
+              <p className="text-xs text-gray-500 mt-2">How often to check product prices (minimum 1 minute)</p>
             </div>
 
             <div>

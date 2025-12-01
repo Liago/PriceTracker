@@ -19,10 +19,11 @@ const cron = require('node-cron');
 const { checkProductPrices } = require('./services/priceTracker');
 
 // Price tracking cron job
-const priceCheckInterval = process.env.PRICE_CHECK_INTERVAL || '6'; // hours
-const cronExpression = `0 */${priceCheckInterval} * * *`; // Every N hours
+// Price tracking cron job
+// Run every minute to check if any product needs updating based on user settings
+const cronExpression = '* * * * *';
 
-console.log(`[Server] Price tracking cron scheduled: every ${priceCheckInterval} hours`);
+console.log(`[Server] Price tracking cron scheduled: ${cronExpression} (every minute)`);
 
 cron.schedule(cronExpression, () => {
 	console.log('[Server] Running scheduled price check...');

@@ -4,11 +4,13 @@ import { ArrowLeft, ExternalLink, Save, Trash2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { toast } from 'sonner'
 import ConfirmationModal from '../components/ConfirmationModal'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 
 export default function ProductDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [product, setProduct] = useState(null)
+  const [priceHistory, setPriceHistory] = useState([])
   const [loading, setLoading] = useState(true)
   const [targetPrice, setTargetPrice] = useState('')
   const [monitoringUntil, setMonitoringUntil] = useState('')
@@ -16,24 +18,50 @@ export default function ProductDetail() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
 
   useEffect(() => {
-    fetchProduct()
+    fetchProductAndHistory()
   }, [id])
 
-  const fetchProduct = async () => {
+  const fetchProductAndHistory = async () => {
     try {
-      const { data, error } = await supabase
+      // Fetch product details
+      const { data: productData, error: productError } = await supabase
         .from('products')
         .select('*')
         .eq('id', id)
         .single()
       
-      if (error) throw error
-      setProduct(data)
-      setTargetPrice(data.target_price || '')
-      setMonitoringUntil(data.monitoring_until || '')
+      if (productError) throw productError
+      setProduct(productData)
+      setTargetPrice(productData.target_price || '')
+      setMonitoringUntil(productData.monitoring_until || '')
+
+      // Fetch price history
+      const { data: historyData, error: historyError } = await supabase
+        .from('price_history')
+        .select('*')
+        .eq('product_id', id)
+        .order('recorded_at', { ascending: true })
+
+      if (historyError) throw historyError
+      
+      // Format history for chart
+      const formattedHistory = historyData.map(item => ({
+        price: Number(item.price),
+        date: new Date(item.recorded_at).toLocaleDateString(undefined, { 
+          month: 'short', 
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        }),
+        originalDate: item.recorded_at
+      }))
+      
+      setPriceHistory(formattedHistory)
+
     } catch (error) {
-      console.error('Error fetching product:', error)
-      navigate('/')
+      console.error('Error fetching data:', error)
+      // If product not found, redirect. If history fails, just show empty chart.
+      if (!product) navigate('/')
     } finally {
       setLoading(false)
     }
@@ -61,7 +89,6 @@ export default function ProductDetail() {
   }
 
   const handleDelete = async () => {
-    
     try {
       const { error } = await supabase.from('products').delete().eq('id', id)
       if (error) throw error
@@ -85,13 +112,13 @@ export default function ProductDetail() {
           Back to Dashboard
         </button>
 
-        <div className="bg-gray-800 rounded-xl overflow-hidden border border-gray-700 shadow-2xl">
+        <div className="bg-gray-800 rounded-xl overflow-hidden border border-gray-700 shadow-2xl mb-8">
           <div className="grid md:grid-cols-2 gap-8 p-8">
-            <div className="aspect-square bg-gray-900 rounded-lg overflow-hidden relative">
+            <div className="aspect-square bg-gray-900 rounded-lg overflow-hidden relative flex items-center justify-center">
               {product.image ? (
                 <img src={product.image} alt={product.name} className="w-full h-full object-contain" />
               ) : (
-                <div className="w-full h-full flex items-center justify-center text-gray-600">No Image</div>
+                <div className="text-gray-600">No Image</div>
               )}
             </div>
             
@@ -131,7 +158,6 @@ export default function ProductDetail() {
                       onChange={(e) => setTargetPrice(e.target.value)}
                     />
                   </div>
-                  <p className="text-xs text-gray-500 mt-2">We'll notify you when the price drops below this amount.</p>
                 </div>
 
                 <div>
@@ -142,7 +168,6 @@ export default function ProductDetail() {
                     value={monitoringUntil}
                     onChange={(e) => setMonitoringUntil(e.target.value)}
                   />
-                  <p className="text-xs text-gray-500 mt-2">Stop tracking this product after this date.</p>
                 </div>
 
                 <div className="flex gap-3 pt-4">
@@ -163,6 +188,47 @@ export default function ProductDetail() {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* Price History Chart */}
+        <div className="bg-gray-800 rounded-xl border border-gray-700 shadow-2xl p-8">
+          <h2 className="text-xl font-bold mb-6">Price History</h2>
+          <div className="h-[300px] w-full">
+            {priceHistory.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={priceHistory}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis 
+                    dataKey="date" 
+                    stroke="#9CA3AF" 
+                    tick={{ fill: '#9CA3AF' }}
+                    tickMargin={10}
+                  />
+                  <YAxis 
+                    stroke="#9CA3AF" 
+                    tick={{ fill: '#9CA3AF' }}
+                    domain={['auto', 'auto']}
+                  />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#1F2937', borderColor: '#374151', color: '#fff' }}
+                    itemStyle={{ color: '#fff' }}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="price" 
+                    stroke="#3B82F6" 
+                    strokeWidth={2}
+                    dot={{ fill: '#3B82F6', strokeWidth: 2 }}
+                    activeDot={{ r: 8 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-gray-500">
+                No price history available yet.
+              </div>
+            )}
           </div>
         </div>
 

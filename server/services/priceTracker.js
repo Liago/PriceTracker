@@ -194,10 +194,21 @@ async function checkProductPrices() {
 		for (const [userId, userProductList] of Object.entries(userProducts)) {
 			// Fetch user settings
 			const userSettings = await getUserSettings(userId);
+			const intervalMinutes = userSettings.price_check_interval || 360; // Default 6 hours (360 mins)
 
 			for (const product of userProductList) {
 				try {
-					console.log(`[Price Tracker] Checking: ${product.name}`);
+					// Check if it's time to update this product
+					const lastChecked = product.last_checked_at ? new Date(product.last_checked_at) : new Date(0);
+					const nextCheck = new Date(lastChecked.getTime() + intervalMinutes * 60000);
+					const now = new Date();
+
+					if (now < nextCheck) {
+						// Not time yet
+						continue;
+					}
+
+					console.log(`[Price Tracker] Checking: ${product.name} (Last check: ${lastChecked.toISOString()})`);
 
 					// Scrape current price
 					const scrapedData = await scrapeProductPrice(product.url);
