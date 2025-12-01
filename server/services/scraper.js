@@ -1,17 +1,23 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 
 async function scrapeProduct(url) {
 	try {
+		// Configure browser for Serverless (Netlify/Lambda)
 		const browser = await puppeteer.launch({
-			headless: 'new',
-			args: ['--no-sandbox', '--disable-setuid-sandbox']
+			args: chromium.args,
+			defaultViewport: chromium.defaultViewport,
+			executablePath: process.env.CHROME_EXECUTABLE_PATH || await chromium.executablePath(),
+			headless: chromium.headless,
+			ignoreHTTPSErrors: true,
 		});
+
 		const page = await browser.newPage();
 
 		// Set user agent to avoid being blocked
 		await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
 
-		await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+		await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }); // Reduced timeout for serverless
 
 		const data = await page.evaluate((url) => {
 			const getMeta = (name) => {
