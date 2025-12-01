@@ -8,16 +8,17 @@ const { checkProductPrices } = require('../../server/services/priceTracker');
 dotenv.config();
 
 const app = express();
+const router = express.Router();
 
 app.use(cors());
 app.use(express.json());
 
-app.get('/', (req, res) => {
+router.get('/', (req, res) => {
 	res.send('Price Tracker API (Netlify Functions)');
 });
 
 // Scrape endpoint
-app.post('/scrape', async (req, res) => {
+router.post('/scrape', async (req, res) => {
 	const { url } = req.body;
 
 	if (!url) {
@@ -34,7 +35,7 @@ app.post('/scrape', async (req, res) => {
 });
 
 // Manual check endpoint
-app.post('/check-prices', async (req, res) => {
+router.post('/check-prices', async (req, res) => {
 	try {
 		await checkProductPrices();
 		res.json({ message: 'Price check completed' });
@@ -43,6 +44,10 @@ app.post('/check-prices', async (req, res) => {
 		res.status(500).json({ error: 'Price check failed' });
 	}
 });
+
+// Mount router at /api (for local/rewrite) and /.netlify/functions/api (for direct access)
+app.use('/api', router);
+app.use('/.netlify/functions/api', router);
 
 // Export the handler
 module.exports.handler = serverless(app);
