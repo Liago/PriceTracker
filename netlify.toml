@@ -1,6 +1,9 @@
 [build]
+  # Build command: Install server deps (for functions), install client deps, build client
   command = "npm install --prefix server && npm install --prefix client && npm run build --prefix client"
+  # Publish directory: The built React app
   publish = "client/dist"
+  # Functions directory
   functions = "netlify/functions"
 
 [functions]
@@ -21,4 +24,4 @@
 
 # Scheduled Functions (Cron)
 [functions.scheduled-check]
-  schedule = "* * * * *"  # Run every minute
+  schedule = "* * * * *"
