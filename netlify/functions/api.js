@@ -25,6 +25,19 @@ router.post('/scrape', async (req, res) => {
 
 	let { url } = req.body;
 
+	// Handle Buffer body (Netlify/Serverless specific)
+	if (req.body && req.body.type === 'Buffer' && Array.isArray(req.body.data)) {
+		try {
+			const buffer = Buffer.from(req.body.data);
+			const text = buffer.toString('utf-8');
+			console.log('[Debug] Converted Buffer to string:', text);
+			const parsed = JSON.parse(text);
+			url = parsed.url;
+		} catch (e) {
+			console.error('[Debug] Buffer conversion failed:', e);
+		}
+	}
+
 	// Fallback: If express.json() didn't work and body is a string
 	if (!url && typeof req.body === 'string') {
 		try {
