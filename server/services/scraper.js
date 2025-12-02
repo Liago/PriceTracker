@@ -10,10 +10,19 @@ async function scrapeProduct(url) {
 		if (isProduction) {
 			// Production: Use @sparticuz/chromium
 			const chromium = require('@sparticuz/chromium');
+
+			// Enhanced args for Lambda environment
+			const lambdaArgs = [
+				...chromium.args,
+				'--single-process',
+				'--disable-dev-shm-usage',
+				'--no-zygote',
+			];
+
 			browser = await puppeteer.launch({
-				args: chromium.args,
+				args: lambdaArgs,
 				defaultViewport: chromium.defaultViewport,
-				executablePath: process.env.CHROME_EXECUTABLE_PATH || await chromium.executablePath(),
+				executablePath: await chromium.executablePath(),
 				headless: chromium.headless,
 				ignoreHTTPSErrors: true,
 			});
