@@ -26,15 +26,25 @@ router.post('/scrape', async (req, res) => {
 	let { url } = req.body;
 
 	// Handle Buffer body (Netlify/Serverless specific)
-	if (req.body && req.body.type === 'Buffer' && Array.isArray(req.body.data)) {
+	if (Buffer.isBuffer(req.body)) {
 		try {
-			const buffer = Buffer.from(req.body.data);
-			const text = buffer.toString('utf-8');
-			console.log('[Debug] Converted Buffer to string:', text);
+			const text = req.body.toString('utf-8');
+			console.log('[Debug] Converted raw Buffer to string:', text);
 			const parsed = JSON.parse(text);
 			url = parsed.url;
 		} catch (e) {
-			console.error('[Debug] Buffer conversion failed:', e);
+			console.error('[Debug] Raw Buffer conversion failed:', e);
+		}
+	} else if (req.body && req.body.type === 'Buffer' && Array.isArray(req.body.data)) {
+		// Handle JSON-serialized Buffer (e.g. from JSON.stringify)
+		try {
+			const buffer = Buffer.from(req.body.data);
+			const text = buffer.toString('utf-8');
+			console.log('[Debug] Converted serialized Buffer to string:', text);
+			const parsed = JSON.parse(text);
+			url = parsed.url;
+		} catch (e) {
+			console.error('[Debug] Serialized Buffer conversion failed:', e);
 		}
 	}
 
