@@ -2,14 +2,20 @@ const { createClient } = require('@supabase/supabase-js');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
+
+// Public client with RLS (for backward compatibility if needed)
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Service role client for scheduled operations (bypasses RLS)
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseKey;
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
 // Default settings (fallback)
 const DEFAULT_SCRAPE_DELAY = 2000;
 const DEFAULT_MAX_RETRIES = 1;
 
 async function getUserSettings(userId) {
-	const { data, error } = await supabase
+	const { data, error } = await supabaseAdmin
 		.from('user_settings')
 		.select('*')
 		.eq('user_id', userId)
@@ -79,7 +85,7 @@ async function checkProductPrices() {
 
 	try {
 		// Fetch all active products (monitoring_until is null or in the future)
-		const { data: products, error } = await supabase
+		const { data: products, error } = await supabaseAdmin
 			.from('products')
 			.select('*')
 			.or('monitoring_until.is.null,monitoring_until.gte.' + new Date().toISOString().split('T')[0]);
@@ -137,7 +143,7 @@ async function checkProductPrices() {
 					const priceChanged = Math.abs(newPrice - oldPrice) > 0.01;
 
 					// Update product with new price and last_checked_at
-					const { error: updateError } = await supabase
+					const { error: updateError } = await supabaseAdmin
 						.from('products')
 						.update({
 							current_price: newPrice,
@@ -153,7 +159,7 @@ async function checkProductPrices() {
 					if (priceChanged) {
 						console.log(`[Price Tracker] Price changed for ${product.name}: ${oldPrice} → ${newPrice}`);
 
-						const { error: historyError } = await supabase
+						const { error: historyError } = await supabaseAdmin
 							.from('price_history')
 							.insert({
 								product_id: product.id,
@@ -169,7 +175,7 @@ async function checkProductPrices() {
 							console.log(`[Price Tracker] 🎉 Target price reached for ${product.name}!`);
 
 							// Create notification
-							const { error: notifError } = await supabase
+							const { error: notifError } = await supabaseAdmin
 								.from('notifications')
 								.insert({
 									user_id: product.user_id,
