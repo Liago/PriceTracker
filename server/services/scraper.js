@@ -105,6 +105,26 @@ async function scrapeProduct(url) {
 			// 4. Price extraction
 			let price = getMeta('product:price:amount') || getMeta('og:price:amount');
 			let currency = getMeta('product:price:currency') || getMeta('og:price:currency') || 'EUR';
+			let available = true;
+
+			// Check availability explicitly
+			if (isAmazon) {
+				const availabilityElement = document.querySelector('#availability');
+				if (availabilityElement) {
+					const text = availabilityElement.innerText.toLowerCase();
+					if (text.includes('non disponibile') || text.includes('currently unavailable') || text.includes('out of stock')) {
+						available = false;
+					}
+				}
+
+				// Also check if price is missing and we have "Currently unavailable" text elsewhere
+				if (!price) {
+					const bodyText = document.body.innerText.toLowerCase();
+					if (bodyText.includes('non disponibile') || bodyText.includes('currently unavailable')) {
+						available = false;
+					}
+				}
+			}
 
 			if (isAmazon && !price) {
 				const priceSelectors = [
@@ -132,6 +152,12 @@ async function scrapeProduct(url) {
 				}
 			}
 
+			// If we still don't have a price, and we haven't explicitly found it to be unavailable, 
+			// it's likely unavailable if we are on a known store like Amazon.
+			if (!price && isAmazon) {
+				available = false;
+			}
+
 			// 5. JSON-LD Fallback (Structured Data)
 			if (!title || !image || !price) {
 				const jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
@@ -157,7 +183,7 @@ async function scrapeProduct(url) {
 				}
 			}
 
-			return { title, image, description, price, currency, store, details };
+			return { title, image, description, price, currency, store, details, available };
 		}, url);
 
 		await browser.close();
