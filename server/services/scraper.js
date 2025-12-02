@@ -1,5 +1,4 @@
 const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
 
 async function scrapeProduct(url) {
 	try {
@@ -10,6 +9,7 @@ async function scrapeProduct(url) {
 
 		if (isProduction) {
 			// Production: Use @sparticuz/chromium
+			const chromium = require('@sparticuz/chromium');
 			browser = await puppeteer.launch({
 				args: chromium.args,
 				defaultViewport: chromium.defaultViewport,

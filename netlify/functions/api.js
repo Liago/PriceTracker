@@ -19,10 +19,31 @@ router.get('/', (req, res) => {
 
 // Scrape endpoint
 router.post('/scrape', async (req, res) => {
-	const { url } = req.body;
+	console.log('[Debug] Request Headers:', JSON.stringify(req.headers));
+	console.log('[Debug] Request Body Type:', typeof req.body);
+	console.log('[Debug] Request Body:', JSON.stringify(req.body));
+
+	let { url } = req.body;
+
+	// Fallback: If express.json() didn't work and body is a string
+	if (!url && typeof req.body === 'string') {
+		try {
+			const parsed = JSON.parse(req.body);
+			url = parsed.url;
+			console.log('[Debug] Manually parsed body:', parsed);
+		} catch (e) {
+			console.error('[Debug] Manual JSON parse failed:', e);
+		}
+	}
 
 	if (!url) {
-		return res.status(400).json({ error: 'URL is required' });
+		return res.status(400).json({
+			error: 'URL is required',
+			debug: {
+				bodyType: typeof req.body,
+				bodyReceived: req.body
+			}
+		});
 	}
 
 	try {
