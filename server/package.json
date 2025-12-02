@@ -13,12 +13,12 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@sparticuz/chromium": "^123.0.1",
+    "@sparticuz/chromium": "^119.0.0",
     "@supabase/supabase-js": "^2.86.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
-    "puppeteer-core": "^22.6.0",
+    "puppeteer-core": "^21.5.2",
     "serverless-http": "^3.2.0"
   },
   "devDependencies": {
