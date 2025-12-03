@@ -109,22 +109,27 @@ async function scrapeProduct(url) {
 			let price = getMeta('product:price:amount') || getMeta('og:price:amount');
 			let currency = getMeta('product:price:currency') || getMeta('og:price:currency') || 'EUR';
 			let available = true;
+			let availabilityDebug = "Not checked";
 
 			// Check availability explicitly
 			if (isAmazon) {
 				const availabilityElement = document.querySelector('#availability');
 				if (availabilityElement) {
 					const text = availabilityElement.innerText.toLowerCase();
+					availabilityDebug = text.trim();
 					if (text.includes('non disponibile') || text.includes('currently unavailable') || text.includes('out of stock')) {
 						available = false;
 					}
+				} else {
+					availabilityDebug = "Element #availability not found";
 				}
 
 				// Also check if price is missing and we have "Currently unavailable" text elsewhere
 				if (!price) {
 					const bodyText = document.body.innerText.toLowerCase();
 					if (bodyText.includes('non disponibile') || bodyText.includes('currently unavailable')) {
-						available = false;
+						// Only set to false if we are fairly sure, otherwise we might miss a price
+						// available = false; // Commented out to be less aggressive, let's rely on #availability first
 					}
 				}
 			}
@@ -135,7 +140,12 @@ async function scrapeProduct(url) {
 					'#priceblock_ourprice',
 					'#priceblock_dealprice',
 					'.a-price-whole',
-					'#corePrice_feature_div .a-price .a-offscreen'
+					'#corePrice_feature_div .a-price .a-offscreen',
+					'#corePriceDisplay_desktop_feature_div .a-price .a-offscreen',
+					'#corePrice_desktop .a-price .a-offscreen',
+					'.apexPriceToPay .a-offscreen',
+					'.priceToPay .a-offscreen',
+					'#apex_desktop .a-price .a-offscreen'
 				];
 
 				for (const selector of priceSelectors) {
