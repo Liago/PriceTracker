@@ -59,23 +59,14 @@ async function scrapeProduct(url) {
 			domain: domain
 		});
 
-		// Navigate with longer timeout and wait for network to be idle
-		try {
-			await page.goto(url, {
-				waitUntil: 'networkidle2',
-				timeout: 30000
-			});
-		} catch (e) {
-			// If networkidle2 times out, try with domcontentloaded as fallback
-			console.log('[Scraper] networkidle2 timeout, falling back to domcontentloaded');
-			await page.goto(url, {
-				waitUntil: 'domcontentloaded',
-				timeout: 30000
-			});
-		}
+		// Navigate with a single strategy - don't do multiple goto calls
+		await page.goto(url, {
+			waitUntil: 'domcontentloaded',
+			timeout: 30000
+		});
 
 		// Wait a bit more for dynamic content to load
-		await new Promise(resolve => setTimeout(resolve, 2000));
+		await new Promise(resolve => setTimeout(resolve, 3000));
 
 		const data = await page.evaluate((url) => {
 			const getMeta = (name) => {
