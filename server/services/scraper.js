@@ -41,13 +41,41 @@ async function scrapeProduct(url) {
 
 		const page = await browser.newPage();
 
+		// Set viewport to mimic a real desktop browser
+		await page.setViewport({ width: 1920, height: 1080 });
+
 		// Set user agent and headers to avoid being blocked and ensure consistent language
 		await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
 		await page.setExtraHTTPHeaders({
-			'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7'
+			'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
+			'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
 		});
 
-		await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }); // Reduced timeout for serverless
+		// Set cookies to appear more like a real user
+		const domain = new URL(url).hostname;
+		await page.setCookie({
+			name: 'session-id',
+			value: '000-0000000-0000000',
+			domain: domain
+		});
+
+		// Navigate with longer timeout and wait for network to be idle
+		try {
+			await page.goto(url, {
+				waitUntil: 'networkidle2',
+				timeout: 30000
+			});
+		} catch (e) {
+			// If networkidle2 times out, try with domcontentloaded as fallback
+			console.log('[Scraper] networkidle2 timeout, falling back to domcontentloaded');
+			await page.goto(url, {
+				waitUntil: 'domcontentloaded',
+				timeout: 30000
+			});
+		}
+
+		// Wait a bit more for dynamic content to load
+		await page.waitForTimeout(2000);
 
 		const data = await page.evaluate((url) => {
 			const getMeta = (name) => {
