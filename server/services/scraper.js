@@ -75,7 +75,7 @@ async function scrapeProduct(url) {
 		}
 
 		// Wait a bit more for dynamic content to load
-		await page.waitForTimeout(2000);
+		await new Promise(resolve => setTimeout(resolve, 2000));
 
 		const data = await page.evaluate((url) => {
 			const getMeta = (name) => {
