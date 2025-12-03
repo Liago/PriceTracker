@@ -207,7 +207,15 @@ async function scrapeProduct(url) {
 				}
 			}
 
-			return { title, image, description, price, currency, store, details, available };
+			// Debug info
+			const debug = {
+				availabilityText: availabilityDebug,
+				titleFound: !!title,
+				priceFound: !!price,
+				htmlPreview: document.body.innerHTML.substring(0, 500) // First 500 chars
+			};
+
+			return { title, image, description, price, currency, store, details, available, debug };
 		}, url);
 
 		await browser.close();
