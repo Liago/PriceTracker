@@ -130,6 +130,8 @@ async function scrapeProduct(url) {
 			let available = true;
 			let availabilityDebug = "Not checked";
 
+			const isSwappie = url.includes('swappie.com');
+
 			// Check availability explicitly
 			if (isAmazon) {
 				const availabilityElement = document.querySelector('#availability');
@@ -149,6 +151,29 @@ async function scrapeProduct(url) {
 					if (bodyText.includes('non disponibile') || bodyText.includes('currently unavailable')) {
 						// Only set to false if we are fairly sure, otherwise we might miss a price
 						// available = false; // Commented out to be less aggressive, let's rely on #availability first
+					}
+				}
+			}
+
+			// Swappie-specific selectors
+			if (isSwappie && !price) {
+				const swappiePriceSelectors = [
+					'[class*="price"] [class*="value"]',
+					'[class*="Price"]',
+					'h2[class*="price"]',
+					'div[class*="price"] span',
+					'[data-testid="price"]'
+				];
+
+				for (const selector of swappiePriceSelectors) {
+					const priceElement = document.querySelector(selector);
+					if (priceElement) {
+						const text = priceElement.textContent.trim();
+						// Make sure it's a price (contains € and digits) and not a discount badge
+						if (text.match(/€\s*\d{3,}/) || text.match(/\d{3,}\s*€/)) {
+							price = text;
+							break;
+						}
 					}
 				}
 			}
@@ -177,20 +202,28 @@ async function scrapeProduct(url) {
 			}
 
 			if (!price) {
-				// Fallback regex: Be stricter. 
-				// Avoid matching small numbers that might be shipping costs or savings (e.g. "10€") if available is false
-				// Look for larger patterns or specific contexts if possible, but for now just restrict the regex
-				const priceRegex = /[\$€£]\s*\d+([.,]\d{2,3})?|\d+([.,]\d{2,3})?\s*[\$€£]/;
-				const elements = document.body.innerText.match(priceRegex);
+				// Fallback regex: Find all prices and pick the largest one to avoid discount badges
+				const priceRegex = /[\$€£]\s*\d+([.,]\d{2,3})?|\d+([.,]\d{2,3})?\s*[\$€£]/g;
+				const allPrices = document.body.innerText.match(priceRegex);
 
-				if (elements) {
-					const foundPrice = elements[0];
-					// Heuristic: If we think it's unavailable, and the found price is very low (e.g. < 15), it might be a false positive (shipping, etc.)
-					// This is a rough heuristic.
-					if (!available) {
-						// Do nothing, trust unavailability
-					} else {
-						price = foundPrice;
+				if (allPrices && allPrices.length > 0) {
+					// Parse prices and find the maximum (most likely the actual price, not a discount)
+					const parsedPrices = allPrices.map(p => {
+						const numStr = p.replace(/[€\$£\s]/g, '').replace(',', '.');
+						return { text: p, value: parseFloat(numStr) };
+					}).filter(p => !isNaN(p.value));
+
+					if (parsedPrices.length > 0) {
+						// Sort by value descending and take the largest
+						parsedPrices.sort((a, b) => b.value - a.value);
+						const foundPrice = parsedPrices[0].text;
+
+						// Heuristic: If we think it's unavailable, don't trust fallback
+						if (!available) {
+							// Do nothing, trust unavailability
+						} else {
+							price = foundPrice;
+						}
 					}
 				}
 			}
