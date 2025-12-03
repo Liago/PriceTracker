@@ -14,7 +14,7 @@ app.get('/', (req, res) => {
 	res.send('Price Tracker API is running');
 });
 
-const puppeteer = require('puppeteer');
+
 const cron = require('node-cron');
 const { checkProductPrices } = require('./services/priceTracker');
 

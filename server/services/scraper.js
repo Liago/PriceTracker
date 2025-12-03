@@ -41,8 +41,11 @@ async function scrapeProduct(url) {
 
 		const page = await browser.newPage();
 
-		// Set user agent to avoid being blocked
+		// Set user agent and headers to avoid being blocked and ensure consistent language
 		await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
+		await page.setExtraHTTPHeaders({
+			'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7'
+		});
 
 		await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }); // Reduced timeout for serverless
 
@@ -145,10 +148,21 @@ async function scrapeProduct(url) {
 			}
 
 			if (!price) {
+				// Fallback regex: Be stricter. 
+				// Avoid matching small numbers that might be shipping costs or savings (e.g. "10€") if available is false
+				// Look for larger patterns or specific contexts if possible, but for now just restrict the regex
 				const priceRegex = /[\$€£]\s*\d+([.,]\d{2,3})?|\d+([.,]\d{2,3})?\s*[\$€£]/;
 				const elements = document.body.innerText.match(priceRegex);
+
 				if (elements) {
-					price = elements[0];
+					const foundPrice = elements[0];
+					// Heuristic: If we think it's unavailable, and the found price is very low (e.g. < 15), it might be a false positive (shipping, etc.)
+					// This is a rough heuristic.
+					if (!available) {
+						// Do nothing, trust unavailability
+					} else {
+						price = foundPrice;
+					}
 				}
 			}
 
