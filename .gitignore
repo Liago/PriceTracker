@@ -1,1 +1,38 @@
+# Dependencies
 server/node_modules/
+client/node_modules/
+node_modules/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+*.env
+*.env.*
+!*.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build
+dist/
+build/
+.netlify/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporary files
+*.tmp
+.temp/

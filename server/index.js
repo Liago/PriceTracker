@@ -4,8 +4,12 @@ const dotenv = require('dotenv');
 
 dotenv.config();
 
+// Validate environment variables before starting the server
+const { validateEnv, getEnv, getEnvNumber } = require('./config/env');
+validateEnv();
+
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = getEnvNumber('PORT');
 
 app.use(cors());
 app.use(express.json());
