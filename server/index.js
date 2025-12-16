@@ -62,11 +62,29 @@ app.post('/api/check-prices', async (req, res) => {
 	res.json({ message: 'Price check started in background' });
 });
 
+// Rate Limiting
+const rateLimit = require('express-rate-limit');
+
+const apiLimiter = rateLimit({
+	windowMs: 15 * 60 * 1000, // 15 minutes
+	max: 100,
+	standardHeaders: true,
+	legacyHeaders: false,
+});
+
+const scrapeLimiter = rateLimit({
+	windowMs: 60 * 1000, // 1 minute
+	max: 10,
+	message: { error: 'Too many scraping requests, please try again later.' }
+});
+
+app.use('/api', apiLimiter);
+
 const { scrapeProduct } = require('./services/scraper');
 
 const { validateProductUrl } = require('./utils/validation');
 
-app.post('/api/scrape', async (req, res) => {
+app.post('/api/scrape', scrapeLimiter, async (req, res) => {
 	const { url } = req.body;
 
 	try {

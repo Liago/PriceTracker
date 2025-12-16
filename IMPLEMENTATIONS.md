@@ -123,11 +123,11 @@ Documento di pianificazione per implementazioni, migliorie e nuove features del 
 
 #### 3.1 Rate Limiting
 - **Implementazione**:
-  - Rate limiting su API endpoints (express-rate-limit)
-  - Protezione contro abuse dello scraper
-  - Limitare numero di prodotti per utente
-  - Limitare numero di refresh manuali
-- **Priorità**: ALTA 🔴
+  - [x] Rate limiting su API endpoints (express-rate-limit)
+  - [x] Protezione contro abuse dello scraper
+  - [ ] Limitare numero di prodotti per utente
+  - [ ] Limitare numero di refresh manuali
+- **Priorità**: COMPLETATO ✅
 
 #### 3.2 Gestione Service Role Key
 - **Problema**: Service role key potrebbe essere esposta

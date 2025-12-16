@@ -14,12 +14,35 @@ const router = express.Router();
 app.use(cors());
 app.use(express.json());
 
-router.get('/', (req, res) => {
+app.get('/', (req, res) => {
 	res.send('Price Tracker API (Netlify Functions)');
 });
 
+// Rate Limiting
+const rateLimit = require('express-rate-limit');
+
+// General API limiter
+const apiLimiter = rateLimit({
+	windowMs: 15 * 60 * 1000, // 15 minutes
+	max: 100, // Limit each IP to 100 requests per windowMs
+	standardHeaders: true,
+	legacyHeaders: false,
+});
+
+// Scraper limiter (stricter)
+const scrapeLimiter = rateLimit({
+	windowMs: 60 * 1000, // 1 minute
+	max: 10, // Limit each IP to 10 requests per minute
+	standardHeaders: true,
+	legacyHeaders: false,
+	message: { error: 'Too many scraping requests, please try again later.' }
+});
+
+app.use('/api', apiLimiter);
+app.use('/.netlify/functions/api', apiLimiter);
+
 // Scrape endpoint
-router.post('/scrape', async (req, res) => {
+router.post('/scrape', scrapeLimiter, async (req, res) => {
 	console.log('[Debug] Request Headers:', JSON.stringify(req.headers));
 	console.log('[Debug] Request Body Type:', typeof req.body);
 	console.log('[Debug] Request Body:', JSON.stringify(req.body));
