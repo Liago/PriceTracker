@@ -27,4 +27,4 @@
 
 # Scheduled Functions (Cron)
 [functions.scheduled-check]
-  schedule = "* * * * *"
+  schedule = "0 * * * *"

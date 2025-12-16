@@ -26,11 +26,11 @@ Documento di pianificazione per implementazioni, migliorie e nuove features del 
 #### 1.1 Sicurezza File Ambiente
 - **Problema**: File `.env` potenzialmente tracciato in git
 - **Soluzione**:
-  - Aggiungere `.env` e `.env.*` a `.gitignore`
-  - Creare `.env.example` con variabili template
-  - Rimuovere eventuali `.env` dalla storia di git (git filter-branch)
-  - Aggiungere validazione environment variables all'avvio
-- **Priorità**: CRITICA ⚠️
+  - [x] Aggiungere `.env` e `.env.*` a `.gitignore`
+  - [x] Creare `.env.example` con variabili template
+  - [x] Rimuovere eventuali `.env` dalla storia di git (git filter-branch)
+  - [x] Aggiungere validazione environment variables all'avvio
+- **Priorità**: COMPLETATO ✅
 
 #### 1.2 Database: Policy Mancanti
 - **Problema**: Policy INSERT per `price_history` potrebbe essere mancante
@@ -44,18 +44,18 @@ Documento di pianificazione per implementazioni, migliorie e nuove features del 
 - **Problema**: Scheduled function configurata per eseguire ogni minuto (`* * * * *`)
 - **Impatto**: Costi elevati, spreco risorse
 - **Soluzione**:
-  - Modificare a esecuzione oraria o ogni 6 ore
-  - Implementare logica intelligente basata su user settings
-  - Aggiungere batch processing per multiple prodotti
-- **Priorità**: ALTA 🔴
+  - [x] Modificare a esecuzione oraria o ogni 6 ore
+  - [ ] Implementare logica intelligente basata su user settings
+  - [ ] Aggiungere batch processing per multiple prodotti
+- **Priorità**: COMPLETATO ✅
 - **File**: `/home/user/PriceTracker/netlify/functions/scheduled-check.js`
 
 #### 1.4 CORS Troppo Permissivo
 - **Problema**: CORS configurato per permettere tutti gli origin
 - **Soluzione**:
-  - Limitare CORS solo ai domini autorizzati
-  - Configurare whitelist basata su environment
-- **Priorità**: ALTA 🔴
+  - [x] Limitare CORS solo ai domini autorizzati
+  - [x] Configurare whitelist basata su environment
+- **Priorità**: COMPLETATO ✅
 - **File**: `/home/user/PriceTracker/server/index.js`
 
 ---
