@@ -17,7 +17,9 @@ const ALLOWED_DOMAINS = [
 	'www.amazon.fr',
 	'www.amazon.es',
 	'swappie.com',
-	'www.swappie.com'
+	'www.swappie.com',
+	'refurbed.it',
+	'www.refurbed.it'
 ];
 
 /**

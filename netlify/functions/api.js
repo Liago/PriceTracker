@@ -76,6 +76,7 @@ router.post('/scrape', async (req, res) => {
 		res.json(data);
 	} catch (error) {
 		if (error.message.includes('URL') || error.message.includes('Domain')) {
+			console.warn('[Validation Error] Request rejected:', error.message);
 			return res.status(400).json({ error: error.message });
 		}
 		console.error('Scraping error:', error);
