@@ -18,7 +18,7 @@ app.use(cors({
 	origin: function (origin, callback) {
 		// Allow requests with no origin (like mobile apps or curl requests)
 		if (!origin) return callback(null, true);
-		
+
 		if (allowedOrigins.indexOf(origin) === -1) {
 			const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
 			return callback(new Error(msg), false);
@@ -64,17 +64,19 @@ app.post('/api/check-prices', async (req, res) => {
 
 const { scrapeProduct } = require('./services/scraper');
 
+const { validateProductUrl } = require('./utils/validation');
+
 app.post('/api/scrape', async (req, res) => {
 	const { url } = req.body;
 
-	if (!url) {
-		return res.status(400).json({ error: 'URL is required' });
-	}
-
 	try {
-		const data = await scrapeProduct(url);
+		const validUrl = validateProductUrl(url);
+		const data = await scrapeProduct(validUrl);
 		res.json(data);
 	} catch (error) {
+		if (error.message.includes('URL') || error.message.includes('Domain')) {
+			return res.status(400).json({ error: error.message });
+		}
 		console.error('Scraping error:', error);
 		res.status(500).json({ error: 'Failed to scrape product' });
 	}

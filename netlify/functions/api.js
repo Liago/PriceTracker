@@ -4,6 +4,7 @@ const dotenv = require('dotenv');
 const serverless = require('serverless-http');
 const { scrapeProduct } = require('../../server/services/scraper');
 const { checkProductPrices } = require('../../server/services/priceTracker');
+const { validateProductUrl } = require('../../server/utils/validation');
 
 dotenv.config();
 
@@ -70,9 +71,13 @@ router.post('/scrape', async (req, res) => {
 	}
 
 	try {
-		const data = await scrapeProduct(url);
+		const validUrl = validateProductUrl(url);
+		const data = await scrapeProduct(validUrl);
 		res.json(data);
 	} catch (error) {
+		if (error.message.includes('URL') || error.message.includes('Domain')) {
+			return res.status(400).json({ error: error.message });
+		}
 		console.error('Scraping error:', error);
 		res.status(500).json({ error: 'Failed to scrape product' });
 	}

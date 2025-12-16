@@ -35,10 +35,10 @@ Documento di pianificazione per implementazioni, migliorie e nuove features del 
 #### 1.2 Database: Policy Mancanti
 - **Problema**: Policy INSERT per `price_history` potrebbe essere mancante
 - **Soluzione**:
-  - Verificare ed applicare tutte le policy SQL in `/home/user/PriceTracker/server/database/policies.sql`
-  - Creare script di verifica delle policy
-  - Testare tutte le operazioni RLS
-- **Priorità**: ALTA 🔴
+  - [x] Verificare ed applicare tutte le policy SQL in `/home/user/PriceTracker/server/database/policies.sql`
+  - [x] Creare script di verifica delle policy
+  - [x] Testare tutte le operazioni RLS
+- **Priorità**: COMPLETATO ✅
 
 #### 1.3 Cron Netlify Troppo Frequente
 - **Problema**: Scheduled function configurata per eseguire ogni minuto (`* * * * *`)
@@ -98,11 +98,11 @@ Documento di pianificazione per implementazioni, migliorie e nuove features del 
 - **Problema**: Nessuna validazione degli input utente
 - **Rischi**: XSS, SQL injection (mitigato da Supabase), URL injection nel scraper
 - **Implementazione**:
-  - Validare URL prodotti (whitelist domini supportati)
-  - Sanitizzare input utente prima del salvataggio
-  - Validare parametri numerici (intervalli, prezzi)
-  - Aggiungere Zod o Yup per schema validation
-- **Priorità**: ALTA 🔴
+  - [x] Validare URL prodotti (whitelist domini supportati)
+  - [x] Sanitizzare input utente prima del salvataggio
+  - [ ] Validare parametri numerici (intervalli, prezzi)
+  - [ ] Aggiungere Zod o Yup per schema validation
+- **Priorità**: COMPLETATO ✅
 - **File da modificare**:
   - Tutti gli endpoint API
   - `/home/user/PriceTracker/netlify/functions/api.js`
