@@ -22,13 +22,25 @@ const ALLOWED_DOMAINS = [
 	'www.refurbed.it'
 ];
 
+
+const { createClient } = require('@supabase/supabase-js');
+
+let supabase;
+
+function getSupabase() {
+	if (!supabase && process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
+		supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+	}
+	return supabase;
+}
+
 /**
  * Validates if a given URL is a supported product URL.
  * @param {string} urlString - The URL to validate.
- * @returns {string} - The clean, validated URL.
+ * @returns {Promise<string>} - The clean, validated URL.
  * @throws {Error} - If the URL is invalid or not supported.
  */
-function validateProductUrl(urlString) {
+async function validateProductUrl(urlString) {
 	if (!urlString || typeof urlString !== 'string') {
 		throw new Error('URL must be a non-empty string');
 	}
@@ -44,8 +56,25 @@ function validateProductUrl(urlString) {
 		throw new Error('URL must use HTTP or HTTPS protocol');
 	}
 
-	if (!ALLOWED_DOMAINS.includes(url.hostname)) {
-		throw new Error(`Domain '${url.hostname}' is not supported. Supported domains: Amazon, Swappie.`);
+	let allowedDomains = ALLOWED_DOMAINS;
+	const client = getSupabase();
+
+	if (client) {
+		try {
+			const { data, error } = await client
+				.from('supported_domains')
+				.select('domain');
+
+			if (!error && data && data.length > 0) {
+				allowedDomains = data.map(d => d.domain);
+			}
+		} catch (err) {
+			console.warn('Failed to fetch supported domains from DB, using fallback:', err.message);
+		}
+	}
+
+	if (!allowedDomains.includes(url.hostname)) {
+		throw new Error(`Domain '${url.hostname}' is not supported.`);
 	}
 
 	return url.toString();

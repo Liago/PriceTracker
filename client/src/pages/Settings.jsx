@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { ArrowLeft, Save } from 'lucide-react'
+import { ArrowLeft, Save, Trash2, Plus, Globe } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { toast } from 'sonner'
 
@@ -16,9 +16,13 @@ export default function Settings() {
     max_retries: 1,
     email_notifications: true
   })
+  const [domains, setDomains] = useState([])
+  const [newDomain, setNewDomain] = useState('')
+  const [addingDomain, setAddingDomain] = useState(false)
 
   useEffect(() => {
     fetchSettings()
+    fetchDomains()
   }, [user])
 
   const fetchSettings = async () => {
@@ -78,6 +82,66 @@ export default function Settings() {
       toast.error('Failed to save settings')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const fetchDomains = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('supported_domains')
+        .select('*')
+        .order('domain')
+      
+      if (error) throw error
+      setDomains(data || [])
+    } catch (error) {
+      console.error('Error fetching domains:', error)
+    }
+  }
+
+  const handleAddDomain = async (e) => {
+    e.preventDefault()
+    if (!newDomain.trim()) return
+
+    setAddingDomain(true)
+    try {
+      const { error } = await supabase
+        .from('supported_domains')
+        .insert({ domain: newDomain.trim() })
+
+      if (error) {
+        if (error.code === '23505') { // Unique violation
+            toast.error('Domain already exists')
+        } else {
+            throw error
+        }
+        return
+      }
+      
+      toast.success('Domain added successfully')
+      setNewDomain('')
+      fetchDomains()
+    } catch (error) {
+      console.error('Error adding domain:', error)
+      toast.error('Failed to add domain')
+    } finally {
+      setAddingDomain(false)
+    }
+  }
+
+  const handleDeleteDomain = async (id) => {
+    try {
+      const { error } = await supabase
+        .from('supported_domains')
+        .delete()
+        .eq('id', id)
+
+      if (error) throw error
+      toast.success('Domain removed')
+      fetchDomains()
+    } catch (error) {
+      console.error('Error removing domain:', error)
+      toast.error('Failed to remove domain')
     }
   }
 
@@ -143,6 +207,50 @@ export default function Settings() {
                 onChange={(e) => setSettings({ ...settings, max_retries: e.target.value })}
               />
               <p className="text-xs text-gray-500 mt-2">Number of retry attempts if scraping fails</p>
+            </div>
+
+            <div className="border-t border-gray-700 pt-6">
+              <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+                <Globe size={20} className="text-blue-400" />
+                Supported Stores
+              </h2>
+              
+              <div className="space-y-4">
+                <form onSubmit={handleAddDomain} className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Add new domain (e.g. ebay.it)"
+                    className="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-sm"
+                    value={newDomain}
+                    onChange={(e) => setNewDomain(e.target.value)}
+                  />
+                  <button
+                    type="submit"
+                    disabled={addingDomain || !newDomain.trim()}
+                    className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg disabled:opacity-50 transition-colors"
+                  >
+                    <Plus size={20} />
+                  </button>
+                </form>
+
+                <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                  {domains.map((domain) => (
+                    <div key={domain.id} className="flex items-center justify-between bg-gray-800/50 border border-gray-700 p-3 rounded-lg group">
+                      <span className="text-gray-300 text-sm font-mono">{domain.domain}</span>
+                      <button
+                        onClick={() => handleDeleteDomain(domain.id)}
+                        className="text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all p-1"
+                        title="Remove domain"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                  {domains.length === 0 && (
+                    <p className="text-gray-500 text-sm italic text-center py-2">No domains configured. Using system defaults.</p>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="border-t border-gray-700 pt-6">

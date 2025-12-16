@@ -71,7 +71,7 @@ router.post('/scrape', async (req, res) => {
 	}
 
 	try {
-		const validUrl = validateProductUrl(url);
+		const validUrl = await validateProductUrl(url);
 		const data = await scrapeProduct(validUrl);
 		res.json(data);
 	} catch (error) {

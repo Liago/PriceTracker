@@ -70,7 +70,7 @@ app.post('/api/scrape', async (req, res) => {
 	const { url } = req.body;
 
 	try {
-		const validUrl = validateProductUrl(url);
+		const validUrl = await validateProductUrl(url);
 		const data = await scrapeProduct(validUrl);
 		res.json(data);
 	} catch (error) {
