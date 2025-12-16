@@ -132,11 +132,11 @@ Documento di pianificazione per implementazioni, migliorie e nuove features del 
 #### 3.2 Gestione Service Role Key
 - **Problema**: Service role key potrebbe essere esposta
 - **Soluzione**:
-  - Verificare che sia solo in variabili ambiente
-  - Usare solo in contesti serverless
-  - Mai esporre al client
-  - Rotazione periodica delle chiavi
-- **Priorità**: ALTA 🔴
+  - [x] Verificare che sia solo in variabili ambiente
+  - [x] Usare solo in contesti serverless
+  - [x] Mai esporre al client
+  - [x] Rotazione periodica delle chiavi
+- **Priorità**: COMPLETATO ✅
 
 #### 3.3 Protezione contro URL Injection
 - **Implementazione**:
@@ -167,7 +167,7 @@ Documento di pianificazione per implementazioni, migliorie e nuove features del 
   CREATE INDEX idx_price_history_created_at ON price_history(created_at DESC);
   CREATE INDEX idx_notifications_user_id_read ON notifications(user_id, is_read);
   ```
-- **Priorità**: ALTA 🟡
+- **Priorità**: COMPLETATO ✅
 - **File**: Nuovo file `/home/user/PriceTracker/server/database/indexes.sql`
 
 #### 4.2 Caching Layer

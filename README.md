@@ -88,8 +88,13 @@ SUPABASE_ANON_KEY=your_supabase_anon_key
 ```env
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+VITE_SUPABASE_URL=your_supabase_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 VITE_API_URL=http://localhost:3000
 ```
+
+> [!CAUTION]
+> **Refusal to leak secrets**: Never add the `SUPABASE_SERVICE_ROLE_KEY` to the client-side `.env` file or any `VITE_*` variable. It bypasses all RLS policies and gives full administrative access to your database. Use it ONLY in the server environment.
 
 ### 4. Supabase Setup
 
