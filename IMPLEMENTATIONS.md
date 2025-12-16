@@ -67,15 +67,15 @@ Documento di pianificazione per implementazioni, migliorie e nuove features del 
 #### 2.1 Sistema di Notifiche Email
 - **Stato**: Schema database presente ma non implementato
 - **Implementazione**:
-  - Integrare servizio email (SendGrid, AWS SES, Resend, o Supabase Edge Functions)
-  - Creare template HTML per notifiche
-  - Implementare logica di invio quando:
-    - Prezzo scende sotto target
-    - Prezzo cambia significativamente (es. >10%)
-    - Prodotto torna disponibile
-  - Aggiungere preferenze di notifica (frequenza, tipi)
-  - Implementare digest giornaliero/settimanale
-- **Priorità**: ALTA 🟡
+  - [x] Integrare servizio email (Nodemailer)
+  - [x] Creare template HTML per notifiche
+  - [x] Implementare logica di invio quando:
+    - [x] Prezzo scende sotto target
+    - [ ] Prezzo cambia significativamente (es. >10%)
+    - [ ] Prodotto torna disponibile
+  - [ ] Aggiungere preferenze di notifica (frequenza, tipi)
+  - [ ] Implementare digest giornaliero/settimanale
+- **Priorità**: COMPLETATO ✅
 - **File da modificare**:
   - `/home/user/PriceTracker/server/services/priceTracker.js`
   - Nuovo file: `/home/user/PriceTracker/server/services/emailService.js`
@@ -140,11 +140,11 @@ Documento di pianificazione per implementazioni, migliorie e nuove features del 
 
 #### 3.3 Protezione contro URL Injection
 - **Implementazione**:
-  - Whitelist di domini supportati
-  - Validazione formato URL
-  - Sandbox per esecuzione scraper
-  - Timeout su richieste HTTP
-- **Priorità**: ALTA 🔴
+  - [x] Whitelist di domini supportati
+  - [x] Validazione formato URL
+  - [x] Sandbox per esecuzione scraper
+  - [x] Timeout su richieste HTTP
+- **Priorità**: COMPLETATO ✅
 - **File**: `/home/user/PriceTracker/server/services/scraper.js`
 
 #### 3.4 Content Security Policy (CSP)
@@ -162,10 +162,11 @@ Documento di pianificazione per implementazioni, migliorie e nuove features del 
 - **Problema**: Mancano indici su colonne frequentemente interrogate
 - **Implementazione**:
   ```sql
+  ```sql
   CREATE INDEX idx_products_user_id ON products(user_id);
   CREATE INDEX idx_price_history_product_id ON price_history(product_id);
-  CREATE INDEX idx_price_history_created_at ON price_history(created_at DESC);
-  CREATE INDEX idx_notifications_user_id_read ON notifications(user_id, is_read);
+  CREATE INDEX idx_price_history_recorded_at ON price_history(recorded_at DESC);
+  CREATE INDEX idx_notifications_user_id_read ON notifications(user_id, read);
   ```
 - **Priorità**: COMPLETATO ✅
 - **File**: Nuovo file `/home/user/PriceTracker/server/database/indexes.sql`

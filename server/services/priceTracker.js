@@ -10,6 +10,9 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseKey;
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
+// Import email service
+const { sendPriceDropNotification } = require('./emailService');
+
 // Default settings (fallback)
 const DEFAULT_SCRAPE_DELAY = 2000;
 const DEFAULT_MAX_RETRIES = 1;
@@ -34,8 +37,10 @@ async function getUserSettings(userId) {
 	};
 }
 
-// Import scraping logic (we'll extract it)
+// Import scraping logic
 const { scrapeProduct } = require('./scraper');
+// Import email service
+const { sendPriceDropNotification } = require('./emailService');
 
 function parsePrice(priceStr, currency) {
 	if (!priceStr) return 0;
@@ -187,6 +192,23 @@ async function checkProductPrices() {
 
 							if (notifError) {
 								console.error(`[Price Tracker] Error creating notification:`, notifError);
+							}
+
+							// Send Email Notification
+							try {
+								// Fetch user email if not already cached/in memory?
+								// Only Admins can read auth.users. supabaseAdmin has admin key.
+								const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(userId);
+
+								if (userError || !userData || !userData.user) {
+									console.error(`[Price Tracker] Could not fetch user email for ${userId}:`, userError);
+								} else {
+									const userEmail = userData.user.email;
+									await sendPriceDropNotification(userEmail, product, oldPrice, newPrice);
+									console.log(`[Price Tracker] Email notification sent to ${userEmail}`);
+								}
+							} catch (emailErr) {
+								console.error(`[Price Tracker] Error sending email:`, emailErr);
 							}
 						}
 					}
