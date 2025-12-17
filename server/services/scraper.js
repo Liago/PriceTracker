@@ -1,4 +1,5 @@
 const puppeteer = require('puppeteer-core');
+const ScraperFactory = require('./scrapers/ScraperFactory');
 
 async function scrapeProduct(url) {
 	try {
@@ -8,10 +9,7 @@ async function scrapeProduct(url) {
 		const isProduction = process.env.AWS_LAMBDA_FUNCTION_VERSION || process.env.NETLIFY;
 
 		if (isProduction) {
-			// Production: Use @sparticuz/chromium
 			const chromium = require('@sparticuz/chromium');
-
-			// Enhanced args for Lambda environment
 			const lambdaArgs = [
 				...chromium.args,
 				'--single-process',
@@ -27,8 +25,7 @@ async function scrapeProduct(url) {
 				ignoreHTTPSErrors: true,
 			});
 		} else {
-			// Local Development: Use local Chrome
-			// Try to find Chrome on macOS
+			// Local Development
 			const localExecutablePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 			browser = await puppeteer.launch({
@@ -40,18 +37,16 @@ async function scrapeProduct(url) {
 		}
 
 		const page = await browser.newPage();
-
-		// Set viewport to mimic a real desktop browser
 		await page.setViewport({ width: 1920, height: 1080 });
 
-		// Set user agent and headers to avoid being blocked and ensure consistent language
+		// Anti-blocking headers
 		await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
 		await page.setExtraHTTPHeaders({
 			'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
 			'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
 		});
 
-		// Set cookies to appear more like a real user
+		// Domain specific cookies (e.g. for Amazon session)
 		const domain = new URL(url).hostname;
 		await page.setCookie({
 			name: 'session-id',
@@ -59,216 +54,26 @@ async function scrapeProduct(url) {
 			domain: domain
 		});
 
-		// Navigate with a single strategy - don't do multiple goto calls
 		await page.goto(url, {
 			waitUntil: 'domcontentloaded',
 			timeout: 30000
 		});
 
-		// Wait a bit more for dynamic content to load
 		await new Promise(resolve => setTimeout(resolve, 3000));
 
-		const data = await page.evaluate((url) => {
-			const getMeta = (name) => {
-				const element = document.querySelector(`meta[property="${name}"]`) || document.querySelector(`meta[name="${name}"]`);
-				return element ? element.content : null;
-			};
+		// USE FACTORY TO GET STRATEGY
+		const scraper = ScraperFactory.getScraper(url, page);
+		const data = await scraper.scrape(url);
 
-			const isAmazon = url.includes('amazon.');
-			let store = new URL(url).hostname.replace('www.', '');
+		// Fallback/Cleanup data if needed
+		if (!data.title) data.title = await page.title();
 
-			// 1. Title extraction
-			let title = getMeta('og:title') || document.title;
-			if (isAmazon) {
-				const titleElement = document.querySelector('#productTitle');
-				if (titleElement) {
-					title = titleElement.textContent.trim();
-				} else {
-					title = title.replace(/\s*:\s*Amazon\.(it|com|co\.uk|de|fr|es).*$/i, '');
-				}
-			}
-
-			// 2. Image extraction
-			let image = getMeta('og:image');
-			if (isAmazon && !image) {
-				const imgElement = document.querySelector('#landingImage, #imgBlkFront, #ebooksImgBlkFront');
-				if (imgElement) {
-					image = imgElement.src || imgElement.getAttribute('data-old-hires') || imgElement.getAttribute('data-a-dynamic-image');
-					if (image && image.startsWith('{')) {
-						try {
-							const imgData = JSON.parse(image);
-							image = Object.keys(imgData)[0];
-						} catch (e) {
-							image = null;
-						}
-					}
-				}
-			}
-
-			// 3. Description extraction
-			let description = getMeta('og:description');
-			let details = {};
-
-			if (isAmazon) {
-				// Get feature bullets for Amazon
-				const bullets = Array.from(document.querySelectorAll('#feature-bullets li span.a-list-item'))
-					.map(el => el.textContent.trim())
-					.filter(text => text.length > 0);
-
-				if (bullets.length > 0) {
-					details.features = bullets;
-					// Use first few bullets as description if meta description is poor
-					if (!description || description.length < 50) {
-						description = bullets.slice(0, 3).join('\n');
-					}
-				}
-			}
-
-			// 4. Price extraction
-			let price = getMeta('product:price:amount') || getMeta('og:price:amount');
-			let currency = getMeta('product:price:currency') || getMeta('og:price:currency') || 'EUR';
-			let available = true;
-			let availabilityDebug = "Not checked";
-
-			const isSwappie = url.includes('swappie.com');
-
-			// Check availability explicitly
-			if (isAmazon) {
-				const availabilityElement = document.querySelector('#availability');
-				if (availabilityElement) {
-					const text = availabilityElement.innerText.toLowerCase();
-					availabilityDebug = text.trim();
-					if (text.includes('non disponibile') || text.includes('currently unavailable') || text.includes('out of stock')) {
-						available = false;
-					}
-				} else {
-					availabilityDebug = "Element #availability not found";
-				}
-
-				// Also check if price is missing and we have "Currently unavailable" text elsewhere
-				if (!price) {
-					const bodyText = document.body.innerText.toLowerCase();
-					if (bodyText.includes('non disponibile') || bodyText.includes('currently unavailable')) {
-						// Only set to false if we are fairly sure, otherwise we might miss a price
-						// available = false; // Commented out to be less aggressive, let's rely on #availability first
-					}
-				}
-			}
-
-			// Swappie-specific selectors
-			if (isSwappie && !price) {
-				const swappiePriceSelectors = [
-					'[class*="price"] [class*="value"]',
-					'[class*="Price"]',
-					'h2[class*="price"]',
-					'div[class*="price"] span',
-					'[data-testid="price"]'
-				];
-
-				for (const selector of swappiePriceSelectors) {
-					const priceElement = document.querySelector(selector);
-					if (priceElement) {
-						const text = priceElement.textContent.trim();
-						// Make sure it's a price (contains € and digits) and not a discount badge
-						if (text.match(/€\s*\d{3,}/) || text.match(/\d{3,}\s*€/)) {
-							price = text;
-							break;
-						}
-					}
-				}
-			}
-
-			if (isAmazon && !price) {
-				const priceSelectors = [
-					'.a-price .a-offscreen',
-					'#priceblock_ourprice',
-					'#priceblock_dealprice',
-					'.a-price-whole',
-					'#corePrice_feature_div .a-price .a-offscreen',
-					'#corePriceDisplay_desktop_feature_div .a-price .a-offscreen',
-					'#corePrice_desktop .a-price .a-offscreen',
-					'.apexPriceToPay .a-offscreen',
-					'.priceToPay .a-offscreen',
-					'#apex_desktop .a-price .a-offscreen'
-				];
-
-				for (const selector of priceSelectors) {
-					const priceElement = document.querySelector(selector);
-					if (priceElement) {
-						price = priceElement.textContent.trim();
-						break;
-					}
-				}
-			}
-
-			if (!price) {
-				// Fallback regex: Find all prices and pick the largest one to avoid discount badges
-				const priceRegex = /[\$€£]\s*\d+([.,]\d{2,3})?|\d+([.,]\d{2,3})?\s*[\$€£]/g;
-				const allPrices = document.body.innerText.match(priceRegex);
-
-				if (allPrices && allPrices.length > 0) {
-					// Parse prices and find the maximum (most likely the actual price, not a discount)
-					const parsedPrices = allPrices.map(p => {
-						const numStr = p.replace(/[€\$£\s]/g, '').replace(',', '.');
-						return { text: p, value: parseFloat(numStr) };
-					}).filter(p => !isNaN(p.value));
-
-					if (parsedPrices.length > 0) {
-						// Sort by value descending and take the largest
-						parsedPrices.sort((a, b) => b.value - a.value);
-						const foundPrice = parsedPrices[0].text;
-
-						// Heuristic: If we think it's unavailable, don't trust fallback
-						if (!available) {
-							// Do nothing, trust unavailability
-						} else {
-							price = foundPrice;
-						}
-					}
-				}
-			}
-
-			// If we still don't have a price, and we haven't explicitly found it to be unavailable, 
-			// it's likely unavailable if we are on a known store like Amazon.
-			if (!price && isAmazon) {
-				available = false;
-			}
-
-			// 5. JSON-LD Fallback (Structured Data)
-			if (!title || !image || !price) {
-				const jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
-				for (const script of jsonLdScripts) {
-					try {
-						const json = JSON.parse(script.innerText);
-						const product = Array.isArray(json) ? json.find(i => i['@type'] === 'Product') : (json['@type'] === 'Product' ? json : null);
-
-						if (product) {
-							if (!title) title = product.name;
-							if (!image) image = Array.isArray(product.image) ? product.image[0] : product.image;
-							if (!description) description = product.description;
-
-							if (!price && product.offers) {
-								const offer = Array.isArray(product.offers) ? product.offers[0] : product.offers;
-								price = offer.price;
-								currency = offer.priceCurrency || currency;
-							}
-						}
-					} catch (e) {
-						// Ignore JSON parse errors
-					}
-				}
-			}
-
-			// Debug info
-			const debug = {
-				availabilityText: availabilityDebug,
-				titleFound: !!title,
-				priceFound: !!price,
-				htmlPreview: document.body.innerHTML.substring(0, 500) // First 500 chars
-			};
-
-			return { title, image, description, price, currency, store, details, available, debug };
-		}, url);
+		// Common post-processing or debug info
+		data.debug = {
+			url,
+			strategy: scraper.constructor.name,
+			foundPrice: !!data.price
+		};
 
 		await browser.close();
 		return data;

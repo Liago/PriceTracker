@@ -576,12 +576,12 @@ Documento di pianificazione per implementazioni, migliorie e nuove features del 
 #### 10.5 Scraper Refactoring
 - **Problema**: Selectors hardcoded, fragili
 - **Implementazione**:
-  - Store-specific scraper classes
-  - Strategy pattern per diversi store
-  - Configuration-driven selectors
-  - Fallback chains
-  - Plugin architecture
-- **Priorità**: ALTA 🟡
+  - [x] Store-specific scraper classes
+  - [x] Strategy pattern per diversi store
+  - [x] Configuration-driven selectors
+  - [x] Fallback chains
+  - [x] Plugin architecture
+- **Priorità**: COMPLETATO ✅
 - **File**: `/home/user/PriceTracker/server/services/scraper.js`
 
 #### 10.6 Environment Validation
