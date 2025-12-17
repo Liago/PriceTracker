@@ -40,7 +40,7 @@ async function getUserSettings(userId) {
 // Import scraping logic
 const { scrapeProduct } = require('./scraper');
 // Import email service
-const { sendPriceDropNotification } = require('./emailService');
+
 
 function parsePrice(priceStr, currency) {
 	if (!priceStr) return 0;
