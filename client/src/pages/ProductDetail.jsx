@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, ExternalLink, Save, Trash2, RefreshCw, List, Maximize2, X, Calendar, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { toast } from 'sonner'
+import { useAuth } from '../context/AuthContext'
+import NotificationBell from '../components/NotificationBell'
 import ConfirmationModal from '../components/ConfirmationModal'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { scrapeProduct } from '../lib/api'
@@ -11,6 +13,7 @@ import { parsePrice } from '../lib/utils'
 export default function ProductDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [product, setProduct] = useState(null)
   const [priceHistory, setPriceHistory] = useState([])
   const [loading, setLoading] = useState(true)
@@ -159,13 +162,18 @@ export default function ProductDetail() {
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <div className="max-w-4xl mx-auto">
-        <button
-          onClick={() => navigate('/')}
-          className="flex items-center gap-2 text-gray-400 hover:text-white mb-8 transition-colors"
-        >
-          <ArrowLeft size={20} />
-          Back to Dashboard
-        </button>
+        <div className="flex justify-between items-center mb-8">
+            <button
+            onClick={() => navigate('/')}
+            className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+            >
+            <ArrowLeft size={20} />
+            Back to Dashboard
+            </button>
+            <div className="mr-8">
+                 <NotificationBell userId={user?.id} />
+            </div>
+        </div>
 
         <div className="bg-gray-800/50 backdrop-blur-xl rounded-3xl overflow-hidden border border-gray-700/50 shadow-2xl mb-8">
           <div className="grid md:grid-cols-2 gap-8 p-8">

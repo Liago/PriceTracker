@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { Plus, Trash2, ExternalLink, LayoutGrid, List, Search, Filter, ArrowUpDown } from 'lucide-react'
 import AddProductModal from '../components/AddProductModal'
 import ConfirmationModal from '../components/ConfirmationModal'
+import NotificationBell from '../components/NotificationBell'
 import { scrapeProduct } from '../lib/api'
 import { supabase } from '../lib/supabase'
 import { parsePrice } from '../lib/utils'
@@ -126,6 +127,9 @@ export default function Dashboard() {
           
           <div className="flex flex-wrap items-center gap-4 w-full md:w-auto">
             <span className="text-gray-400 hidden md:inline">{user?.email}</span>
+            <div className="mr-2">
+                <NotificationBell userId={user?.id} />
+            </div>
             <Link
               to="/settings"
               className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors text-sm"

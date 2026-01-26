@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { ArrowLeft, Save, Trash2, Plus, Globe } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { toast } from 'sonner'
+import NotificationBell from '../components/NotificationBell'
 
 export default function Settings() {
   const { user } = useAuth()
@@ -150,13 +151,18 @@ export default function Settings() {
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
       <div className="max-w-4xl mx-auto">
-        <button
-          onClick={() => navigate('/')}
-          className="flex items-center gap-2 text-gray-400 hover:text-white mb-8 transition-colors"
-        >
-          <ArrowLeft size={20} />
-          Back to Dashboard
-        </button>
+        <div className="flex justify-between items-center mb-8">
+            <button
+            onClick={() => navigate('/')}
+            className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+            >
+            <ArrowLeft size={20} />
+            Back to Dashboard
+            </button>
+            <div className="mr-8">
+                 <NotificationBell userId={user?.id} />
+            </div>
+        </div>
 
         <div className="bg-gray-800 rounded-xl border border-gray-700 shadow-2xl p-8">
           <h1 className="text-3xl font-bold mb-2">Settings</h1>
