@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, ExternalLink, Save, Trash2, RefreshCw, List, Maximize2, X, Calendar, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Save, Trash2, RefreshCw, List, Maximize2, X, Calendar, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { toast } from 'sonner'
 import { useAuth } from '../context/AuthContext'
@@ -176,21 +176,28 @@ export default function ProductDetail() {
             <div className="flex items-center justify-center bg-white/5 rounded-2xl p-8 shadow-inner relative group">
               {product.image ? (
                 <>
-                  <img 
-                    src={product.image} 
-                    alt={product.name} 
-                    className="w-full h-auto max-h-[500px] object-contain drop-shadow-2xl transition-transform duration-300 group-hover:scale-105 cursor-zoom-in"
-                    onClick={() => setIsImageModalOpen(true)}
+                  <img
+                    src={product.image}
+                    alt={product.name}
+                    className={`w-full h-auto max-h-[500px] object-contain drop-shadow-2xl transition-all duration-300 ${refreshing ? 'opacity-40 scale-95' : 'group-hover:scale-105'} cursor-zoom-in`}
+                    onClick={() => !refreshing && setIsImageModalOpen(true)}
                   />
-                  <button 
-                    onClick={() => setIsImageModalOpen(true)}
-                    className="absolute bottom-4 right-4 p-3 bg-black/50 hover:bg-black/70 text-white rounded-full backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-all duration-200 transform translate-y-2 group-hover:translate-y-0"
-                  >
-                    <Maximize2 size={20} />
-                  </button>
+                  {refreshing && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <Loader2 size={48} className="animate-spin text-blue-400" />
+                    </div>
+                  )}
+                  {!refreshing && (
+                    <button
+                      onClick={() => setIsImageModalOpen(true)}
+                      className="absolute bottom-4 right-4 p-3 bg-black/50 hover:bg-black/70 text-white rounded-full backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-all duration-200 transform translate-y-2 group-hover:translate-y-0"
+                    >
+                      <Maximize2 size={20} />
+                    </button>
+                  )}
                 </>
               ) : (
-                <div className="text-gray-600">No Image</div>
+                <div className="text-gray-600">{refreshing ? <Loader2 size={48} className="animate-spin text-blue-400" /> : 'No Image'}</div>
               )}
             </div>
             
@@ -204,10 +211,17 @@ export default function ProductDetail() {
                   <button
                     onClick={handleRefresh}
                     disabled={refreshing}
-                    className={`btn btn-circle btn-ghost btn-sm ${refreshing ? 'loading' : ''}`}
+                    className="btn btn-ghost btn-sm gap-2"
                     title="Refresh Data"
                   >
-                    {!refreshing && <RefreshCw size={18} />}
+                    {refreshing ? (
+                      <>
+                        <Loader2 size={18} className="animate-spin" />
+                        <span className="text-xs text-gray-400">Refreshing...</span>
+                      </>
+                    ) : (
+                      <RefreshCw size={18} />
+                    )}
                   </button>
                 </div>
                 <h1 className="text-3xl md:text-4xl font-extrabold mb-4 leading-tight bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
@@ -226,8 +240,13 @@ export default function ProductDetail() {
               <div className="stats shadow bg-gray-800/40 border border-gray-700/50 backdrop-blur-md overflow-visible">
                 <div className="stat relative">
                   <div className="stat-title text-gray-400 font-medium tracking-wide uppercase text-xs mb-1">Current Price</div>
-                  
-                  {product.details?.available === false ? (
+
+                  {refreshing ? (
+                    <div className="flex flex-col gap-3 py-2">
+                      <div className="skeleton h-12 w-48 bg-gray-700/50 rounded-lg"></div>
+                      <div className="skeleton h-4 w-56 bg-gray-700/30 rounded"></div>
+                    </div>
+                  ) : product.details?.available === false ? (
                     <div className="flex flex-col">
                       <div className="text-3xl md:text-4xl font-bold text-gray-500 line-through decoration-red-500/50 decoration-2">
                         {product.currency} {product.current_price}
@@ -244,7 +263,7 @@ export default function ProductDetail() {
                     </div>
                   )}
 
-                  {product.last_checked_at && (
+                  {refreshing ? null : product.last_checked_at && (
                     <div className="stat-desc text-gray-500 mt-3 flex items-center gap-1.5">
                       <RefreshCw size={12} />
                       Last check: {new Date(product.last_checked_at).toLocaleString()}
@@ -330,7 +349,19 @@ export default function ProductDetail() {
           </div>
 
           {/* Full Width Description / Features Section */}
-          {product.details?.features && product.details.features.length > 0 && (
+          {refreshing ? (
+            <div className="border-t border-gray-700/50 bg-gray-800/30 p-8 md:p-12">
+              <h3 className="text-2xl font-bold mb-6 flex items-center gap-3">
+                <List size={24} className="text-blue-500" />
+                Key Features & Description
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4 pl-6">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="skeleton h-5 bg-gray-700/40 rounded w-full"></div>
+                ))}
+              </div>
+            </div>
+          ) : product.details?.features && product.details.features.length > 0 && (
             <div className="border-t border-gray-700/50 bg-gray-800/30 p-8 md:p-12">
               <h3 className="text-2xl font-bold mb-6 flex items-center gap-3">
                 <List size={24} className="text-blue-500" />
