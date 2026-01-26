@@ -7,7 +7,7 @@ import Dashboard from './pages/Dashboard'
 import ProductDetail from './pages/ProductDetail'
 import Settings from './pages/Settings'
 import Notifications from './pages/Notifications'
-import PrivateRoute from './components/PrivateRoute'
+import ProtectedRoute from './components/ProtectedRoute'
 import Layout from './components/Layout'
 
 import { Toaster } from 'sonner'
@@ -23,7 +23,7 @@ function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             
-            <Route element={<PrivateRoute><Layout /></PrivateRoute>}>
+            <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/product/:id" element={<ProductDetail />} />
               <Route path="/settings" element={<Settings />} />
