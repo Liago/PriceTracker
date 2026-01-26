@@ -5,30 +5,65 @@ class MediaWorldScraper extends BaseScraper {
 		const store = 'mediaworld';
 		const data = await this.getGenericMetadata();
 
-		// MediaWorld often uses shadow DOM or specific data attributes. 
-		// Since generic metadata usually works well on modern sites, we start there.
+		const pageData = await this.page.evaluate(() => {
+			// Price
+			let price = null;
+			const priceEl = document.querySelector('[data-test="product-price"]');
+			if (priceEl) {
+				price = priceEl.innerText;
+			} else {
+				const metaPrice = document.querySelector('meta[itemprop="price"]');
+				if (metaPrice) price = metaPrice.content;
+			}
 
-		// Refine Price
-		const pagePrice = await this.page.evaluate(() => {
-			// Try to find price in specific MW containers
-			// Often dynamic, but checking common patterns
-			const el = document.querySelector('[data-test="product-price"]');
-			if (el) return el.innerText;
-
-			// Fallback to meta if not found in DOM
-			const metaPrice = document.querySelector('meta[itemprop="price"]');
-			return metaPrice ? metaPrice.content : null;
-		});
-
-		if (pagePrice) data.price = pagePrice;
-
-		// Availability check
-		const available = await this.page.evaluate(() => {
+			// Availability
 			const addToCartBtn = document.querySelector('[data-test="add-to-cart-button"]');
-			return !!addToCartBtn && !addToCartBtn.disabled;
+			const available = !!addToCartBtn && !addToCartBtn.disabled;
+
+			// Features: extract product specifications
+			const features = [];
+
+			// MediaWorld product specs table
+			const specRows = document.querySelectorAll('.specs-table tr, [class*="specification"] tr, [data-test="product-specs"] li');
+			specRows.forEach(row => {
+				const label = row.querySelector('td:first-child, th, .spec-label');
+				const value = row.querySelector('td:last-child, .spec-value');
+				if (label && value && label !== value) {
+					const text = `${label.textContent.trim()}: ${value.textContent.trim()}`;
+					if (text.length > 3) features.push(text);
+				} else {
+					const text = row.textContent.trim().replace(/\s+/g, ' ');
+					if (text.length > 3 && text.length < 200) features.push(text);
+				}
+			});
+
+			// Try bullet-point features
+			if (features.length === 0) {
+				const bullets = document.querySelectorAll('[class*="feature"] li, [class*="Feature"] li, [class*="highlight"] li, [class*="Highlight"] li');
+				bullets.forEach(el => {
+					const text = el.textContent.trim();
+					if (text.length > 2) features.push(text);
+				});
+			}
+
+			// Description
+			const descEl = document.querySelector('[data-test="product-description"]') || document.querySelector('[class*="product-description"]') || document.querySelector('[itemprop="description"]');
+			const description = descEl ? descEl.textContent.trim().substring(0, 500) : null;
+
+			return { price, available, features, description };
 		});
 
-		return { ...data, store, available };
+		if (pageData.price) data.price = pageData.price;
+		if (pageData.description && (!data.description || data.description.length < 50)) {
+			data.description = pageData.description;
+		}
+
+		let details = {};
+		if (pageData.features && pageData.features.length > 0) {
+			details.features = pageData.features;
+		}
+
+		return { ...data, store, details, available: pageData.available };
 	}
 }
 
