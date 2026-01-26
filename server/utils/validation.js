@@ -19,7 +19,17 @@ const ALLOWED_DOMAINS = [
 	'swappie.com',
 	'www.swappie.com',
 	'refurbed.it',
-	'www.refurbed.it'
+	'www.refurbed.it',
+	'rework-labs.com',
+	'www.rework-labs.com',
+	'smartgeneration.it',
+	'www.smartgeneration.it',
+	'juice.it',
+	'www.juice.it',
+	'ebay.it',
+	'www.ebay.it',
+	'mediaworld.it',
+	'www.mediaworld.it'
 ];
 
 
@@ -66,7 +76,9 @@ async function validateProductUrl(urlString) {
 				.select('domain');
 
 			if (!error && data && data.length > 0) {
-				allowedDomains = data.map(d => d.domain);
+				// Merge DB domains with hardcoded fallback to ensure base support works
+				const dbDomains = data.map(d => d.domain);
+				allowedDomains = [...new Set([...allowedDomains, ...dbDomains])];
 			}
 		} catch (err) {
 			console.warn('Failed to fetch supported domains from DB, using fallback:', err.message);
