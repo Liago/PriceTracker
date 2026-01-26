@@ -5,23 +5,67 @@ class JuiceScraper extends BaseScraper {
 		const store = 'juice';
 		const data = await this.getGenericMetadata();
 
-		const refinedData = await this.page.evaluate(() => {
+		const pageData = await this.page.evaluate(() => {
+			// Price
 			const priceEl = document.querySelector('[data-price-type="finalPrice"] .price') || document.querySelector('.price-box .price');
+			const price = priceEl ? priceEl.innerText.trim() : null;
 
 			// Availability
 			const stockEl = document.querySelector('.stock.available span');
 			const available = stockEl ? !stockEl.innerText.toLowerCase().includes('non disponibile') : true;
 
-			return {
-				price: priceEl ? priceEl.innerText.trim() : null,
-				available
-			};
+			// Features: extract product specifications
+			const features = [];
+
+			// Magento specs table
+			const specRows = document.querySelectorAll('#product-attribute-specs-table tr, .additional-attributes tr, .product-specs tr');
+			specRows.forEach(row => {
+				const label = row.querySelector('th, td:first-child');
+				const value = row.querySelector('td:last-child, td.data');
+				if (label && value && label !== value) {
+					const text = `${label.textContent.trim()}: ${value.textContent.trim()}`;
+					if (text.length > 3) features.push(text);
+				}
+			});
+
+			// Try product description bullet points
+			if (features.length === 0) {
+				const bullets = document.querySelectorAll('.product.attribute.description li, .product-info-description li, .product.description li');
+				bullets.forEach(el => {
+					const text = el.textContent.trim();
+					if (text.length > 2) features.push(text);
+				});
+			}
+
+			// Try generic feature/highlight lists
+			if (features.length === 0) {
+				const highlights = document.querySelectorAll('[class*="feature"] li, [class*="highlight"] li');
+				highlights.forEach(el => {
+					const text = el.textContent.trim();
+					if (text.length > 2) features.push(text);
+				});
+			}
+
+			// Description
+			const descEl = document.querySelector('.product.attribute.description .value') || document.querySelector('.product-info-description') || document.querySelector('[itemprop="description"]');
+			const description = descEl ? descEl.textContent.trim().substring(0, 500) : null;
+
+			return { price, available, features, description };
 		});
 
-		if (refinedData.price) data.price = refinedData.price;
-		data.available = refinedData.available;
+		if (pageData.price) data.price = pageData.price;
+		data.available = pageData.available;
 
-		return { ...data, store };
+		if (pageData.description && (!data.description || data.description.length < 50)) {
+			data.description = pageData.description;
+		}
+
+		let details = {};
+		if (pageData.features && pageData.features.length > 0) {
+			details.features = pageData.features;
+		}
+
+		return { ...data, store, details };
 	}
 }
 

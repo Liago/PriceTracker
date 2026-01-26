@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ExternalLink, Save, Trash2, RefreshCw, List, Maximize2, X, Calendar, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Save, Trash2, RefreshCw, List, Maximize2, X, Calendar, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { toast } from 'sonner'
 import { useAuth } from '../context/AuthContext'
@@ -161,6 +161,14 @@ export default function ProductDetail() {
   return (
     <div className="p-4 md:p-8">
       <div className="max-w-4xl mx-auto">
+
+        <button
+          onClick={() => navigate('/')}
+          className="btn btn-ghost gap-2 mb-6 text-gray-400 hover:text-white pl-0"
+        >
+          <ArrowLeft size={20} />
+          Back to Dashboard
+        </button>
 
         <div className="bg-gray-800/50 backdrop-blur-xl rounded-3xl overflow-hidden border border-gray-700/50 shadow-2xl mb-8">
           <div className="grid md:grid-cols-2 gap-8 p-8">

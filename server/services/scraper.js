@@ -54,10 +54,18 @@ async function scrapeProduct(url) {
 			domain: domain
 		});
 
-		await page.goto(url, {
-			waitUntil: 'domcontentloaded',
-			timeout: 30000
-		});
+		try {
+			await page.goto(url, {
+				waitUntil: 'domcontentloaded',
+				timeout: 30000
+			});
+		} catch (navError) {
+			// If navigation times out, continue with whatever content was loaded.
+			// Shopify stores and other heavy-JS sites often have enough DOM content
+			// before the full load completes.
+			if (navError.name !== 'TimeoutError') throw navError;
+			console.warn(`Navigation timeout for ${url}, proceeding with partial load`);
+		}
 
 		await new Promise(resolve => setTimeout(resolve, 3000));
 
