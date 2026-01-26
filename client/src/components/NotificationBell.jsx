@@ -1,12 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Bell, Check, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { createClient } from '@supabase/supabase-js';
-
-// Setup Supabase client
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+import { supabase } from '../lib/supabase';
 
 export default function NotificationBell({ userId }) {
   const [notifications, setNotifications] = useState([]);

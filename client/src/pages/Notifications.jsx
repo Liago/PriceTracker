@@ -1,14 +1,9 @@
 import { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 import { Trash2, Check, ArrowLeft } from 'lucide-react';
 import { Link } from 'react-router-dom';
 // Using the AuthContext to get userId would be better, but assuming we can pass it or fetch similarly
 import { useAuth } from '../context/AuthContext';
-
-
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export default function Notifications() {
   const { user } = useAuth();
