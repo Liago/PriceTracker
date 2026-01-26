@@ -7,7 +7,8 @@ import Dashboard from './pages/Dashboard'
 import ProductDetail from './pages/ProductDetail'
 import Settings from './pages/Settings'
 import Notifications from './pages/Notifications'
-import ProtectedRoute from './components/ProtectedRoute'
+import PrivateRoute from './components/PrivateRoute'
+import Layout from './components/Layout'
 
 import { Toaster } from 'sonner'
 
@@ -21,11 +22,15 @@ function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
-            <Route path="/signup" element={<Signup />} />
-            <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/product/:id" element={<ProtectedRoute><ProductDetail /></ProtectedRoute>} />
-            <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-            <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
+            
+            <Route element={<PrivateRoute><Layout /></PrivateRoute>}>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/product/:id" element={<ProductDetail />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/notifications" element={<Notifications />} />
+            </Route>
+            
+            {/* Fallback for unmatched routes, redirects to home if authenticated, or login if not */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>

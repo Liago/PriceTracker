@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Trash2, Check, ArrowLeft } from 'lucide-react';
+import { Trash2, Check } from 'lucide-react';
 import { Link } from 'react-router-dom';
 // Using the AuthContext to get userId would be better, but assuming we can pass it or fetch similarly
 import { useAuth } from '../context/AuthContext';
@@ -71,12 +71,9 @@ export default function Notifications() {
   if (!user) return <div className="p-8 text-center text-white">Please log in.</div>;
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-4 md:p-8">
+    <div className="p-4 md:p-8">
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center mb-6">
-            <Link to="/" className="mr-4 p-2 hover:bg-gray-800 rounded-full transition-colors text-gray-400 hover:text-white">
-                <ArrowLeft size={24} />
-            </Link>
             <h1 className="text-3xl font-bold">Notifications</h1>
         </div>
 

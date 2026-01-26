@@ -1,21 +1,22 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useOutletContext } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Plus, Trash2, ExternalLink, LayoutGrid, List, Search, Filter, ArrowUpDown } from 'lucide-react'
-import AddProductModal from '../components/AddProductModal'
 import ConfirmationModal from '../components/ConfirmationModal'
-import NotificationBell from '../components/NotificationBell'
 import { scrapeProduct } from '../lib/api'
 import { supabase } from '../lib/supabase'
 import { parsePrice } from '../lib/utils'
 
 export default function Dashboard() {
-  const { user, signOut } = useAuth()
-  const [isModalOpen, setIsModalOpen] = useState(false)
+  /* New Dashboard without Header components */
+  const { user } = useAuth()
   const [viewMode, setViewMode] = useState('grid')
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [deleteProductId, setDeleteProductId] = useState(null)
+  
+  // Context from Layout for refresh trigger
+  const { refreshTrigger } = useOutletContext() || { refreshTrigger: 0 }
 
   // Filter & Sort State
   const [searchTerm, setSearchTerm] = useState('')
@@ -34,46 +35,29 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchProducts()
-  }, [user, page, searchTerm, selectedStore, sortBy]) // Refetch on dependency change
+  }, [user, page, searchTerm, selectedStore, sortBy, refreshTrigger]) 
 
   const fetchProducts = async () => {
+    if (!user) return
     setLoading(true)
+    /* ... rest of fetch fetchProducts logic unchanged ... */
     try {
       let query = supabase
         .from('products')
         .select('*', { count: 'exact' })
       
-      // Apply Filters directly in query for server-side pagination
-      if (searchTerm) {
-          query = query.ilike('name', `%${searchTerm}%`)
-      }
-      
-      if (selectedStore !== 'all') {
-          query = query.eq('store', selectedStore)
-      }
+      if (searchTerm) query = query.ilike('name', `%${searchTerm}%`)
+      if (selectedStore !== 'all') query = query.eq('store', selectedStore)
 
-      // Apply Sort
       switch (sortBy) {
-        case 'date-desc':
-            query = query.order('created_at', { ascending: false })
-            break
-        case 'date-asc':
-            query = query.order('created_at', { ascending: true })
-            break
-        case 'price-asc':
-            query = query.order('current_price', { ascending: true })
-            break
-        case 'price-desc':
-            query = query.order('current_price', { ascending: false })
-            break
-        case 'name-asc':
-            query = query.order('name', { ascending: true })
-            break
-        default:
-            query = query.order('created_at', { ascending: false })
+        case 'date-desc': query = query.order('created_at', { ascending: false }); break;
+        case 'date-asc': query = query.order('created_at', { ascending: true }); break;
+        case 'price-asc': query = query.order('current_price', { ascending: true }); break;
+        case 'price-desc': query = query.order('current_price', { ascending: false }); break;
+        case 'name-asc': query = query.order('name', { ascending: true }); break;
+        default: query = query.order('created_at', { ascending: false })
       }
 
-      // Apply Pagination
       const from = (page - 1) * PAGE_SIZE
       const to = from + PAGE_SIZE - 1
       
@@ -89,46 +73,16 @@ export default function Dashboard() {
     }
   }
 
-  const handleAddProduct = async (url) => {
-    // 1. Scrape product data
-    const data = await scrapeProduct(url)
-    
-    // 2. Save to Supabase
-    const { error } = await supabase.from('products').insert([
-      {
-        user_id: user.id,
-        url,
-        name: data.title,
-        image: data.image,
-        description: data.description,
-        current_price: parsePrice(data.price, data.currency),
-        currency: data.currency,
-        store: data.store,
-        details: data.details
-      }
-    ])
-
-    if (error) throw error
-    
-    // 3. Refresh list
-    fetchProducts()
-  }
-
   const handleDelete = async (id) => {
+    /* ... logic unchanged ... */
     const { error } = await supabase.from('products').delete().eq('id', id)
     if (!error) {
       setProducts(products.filter(p => p.id !== id))
     }
   }
 
-  // Derived State: Unique Stores
-  // For store filter dropdown, ideally we should fetch distinct stores separately or use a fixed list.
-  // For now, let's keep it simple: we might lose some store options if they aren't in the first page, 
-  // but for proper implementation we'd need a separate query. 
-  // Let's rely on manual input or a separate 'fetchStores' if needed. 
-  // For this MVP step, we will check if we can fetch all stores lightweight.
+  /* Unique stores logic same as before */
   const [uniqueStores, setUniqueStores] = useState(['all'])
-
   useEffect(() => {
       const fetchStores = async () => {
           const { data } = await supabase.from('products').select('store')
@@ -136,48 +90,18 @@ export default function Dashboard() {
           setUniqueStores(['all', ...stores])
       }
       fetchStores()
-  }, [])
+  }, [refreshTrigger]) // Update stores on refresh too
 
-  // Filtered products are now handled on server
   const filteredProducts = products
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
+    <div className="p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-          <h1 className="text-3xl font-bold">Dashboard</h1>
-          
-          <div className="flex flex-wrap items-center gap-4 w-full md:w-auto">
-            <span className="text-gray-400 hidden md:inline">{user?.email}</span>
-            <div className="mr-2">
-                <NotificationBell userId={user?.id} />
-            </div>
-            <Link
-              to="/settings"
-              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors text-sm"
-            >
-              Settings
-            </Link>
-            <button
-              onClick={() => signOut()}
-              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors text-sm"
-            >
-              Sign Out
-            </button>
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2 transition-colors text-sm ml-auto md:ml-0"
-            >
-              <Plus size={18} />
-              <span className="hidden sm:inline">Add Product</span>
-            </button>
-          </div>
-        </div>
-
+        
         {/* Toolbar: Search & Filters */}
         <div className="bg-gray-800 rounded-xl p-4 mb-8 border border-gray-700 flex flex-col md:flex-row gap-4 items-center justify-between">
-          
-          {/* Search */}
+           {/* ... filters ... */}
+           {/* Search */}
           <div className="relative w-full md:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input
@@ -189,9 +113,9 @@ export default function Dashboard() {
             />
           </div>
 
-          <div className="flex flex-wrap gap-3 w-full md:w-auto">
-            {/* Store Filter */}
-            <div className="relative flex-1 md:flex-none">
+           <div className="flex flex-wrap gap-3 w-full md:w-auto">
+             {/* Store Filter */}
+             <div className="relative flex-1 md:flex-none">
               <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
               <select
                 className="w-full md:w-40 pl-10 pr-8 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-sm appearance-none cursor-pointer"
@@ -206,7 +130,7 @@ export default function Dashboard() {
             </div>
 
             {/* Sort */}
-            <div className="relative flex-1 md:flex-none">
+             <div className="relative flex-1 md:flex-none">
               <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
               <select
                 className="w-full md:w-48 pl-10 pr-8 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500 text-sm appearance-none cursor-pointer"
@@ -223,7 +147,7 @@ export default function Dashboard() {
 
             {/* View Toggle */}
             <div className="flex bg-gray-900 rounded-lg p-1 border border-gray-600">
-              <button
+               <button
                 onClick={() => setViewMode('grid')}
                 className={`p-1.5 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}
                 title="Grid View"
@@ -238,7 +162,7 @@ export default function Dashboard() {
                 <List size={18} />
               </button>
             </div>
-          </div>
+           </div>
         </div>
         
         {/* Product Grid/List */}
@@ -337,12 +261,6 @@ export default function Dashboard() {
                 Next
             </button>
         </div>
-
-        <AddProductModal
-          isOpen={isModalOpen}
-          onClose={() => setIsModalOpen(false)}
-          onAdd={handleAddProduct}
-        />
 
         <ConfirmationModal
           isOpen={deleteProductId !== null}
