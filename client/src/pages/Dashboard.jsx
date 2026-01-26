@@ -22,19 +22,66 @@ export default function Dashboard() {
   const [selectedStore, setSelectedStore] = useState('all')
   const [sortBy, setSortBy] = useState('date-desc')
 
+  // Pagination State
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 12
+  const [totalProducts, setTotalProducts] = useState(0)
+
+  useEffect(() => {
+    // Reset page when filters change
+    setPage(1)
+  }, [searchTerm, selectedStore, sortBy])
+
   useEffect(() => {
     fetchProducts()
-  }, [user])
+  }, [user, page, searchTerm, selectedStore, sortBy]) // Refetch on dependency change
 
   const fetchProducts = async () => {
+    setLoading(true)
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('products')
-        .select('*')
-        .order('created_at', { ascending: false })
+        .select('*', { count: 'exact' })
+      
+      // Apply Filters directly in query for server-side pagination
+      if (searchTerm) {
+          query = query.ilike('name', `%${searchTerm}%`)
+      }
+      
+      if (selectedStore !== 'all') {
+          query = query.eq('store', selectedStore)
+      }
+
+      // Apply Sort
+      switch (sortBy) {
+        case 'date-desc':
+            query = query.order('created_at', { ascending: false })
+            break
+        case 'date-asc':
+            query = query.order('created_at', { ascending: true })
+            break
+        case 'price-asc':
+            query = query.order('current_price', { ascending: true })
+            break
+        case 'price-desc':
+            query = query.order('current_price', { ascending: false })
+            break
+        case 'name-asc':
+            query = query.order('name', { ascending: true })
+            break
+        default:
+            query = query.order('created_at', { ascending: false })
+      }
+
+      // Apply Pagination
+      const from = (page - 1) * PAGE_SIZE
+      const to = from + PAGE_SIZE - 1
+      
+      const { data, error, count } = await query.range(from, to)
       
       if (error) throw error
       setProducts(data || [])
+      setTotalProducts(count || 0)
     } catch (error) {
       console.error('Error fetching products:', error)
     } finally {
@@ -75,49 +122,24 @@ export default function Dashboard() {
   }
 
   // Derived State: Unique Stores
-  const uniqueStores = useMemo(() => {
-    const stores = products.map(p => p.store).filter(Boolean)
-    return ['all', ...new Set(stores)]
-  }, [products])
+  // For store filter dropdown, ideally we should fetch distinct stores separately or use a fixed list.
+  // For now, let's keep it simple: we might lose some store options if they aren't in the first page, 
+  // but for proper implementation we'd need a separate query. 
+  // Let's rely on manual input or a separate 'fetchStores' if needed. 
+  // For this MVP step, we will check if we can fetch all stores lightweight.
+  const [uniqueStores, setUniqueStores] = useState(['all'])
 
-  // Derived State: Filtered & Sorted Products
-  const filteredProducts = useMemo(() => {
-    let result = [...products]
-
-    // 1. Search
-    if (searchTerm) {
-      const lowerTerm = searchTerm.toLowerCase()
-      result = result.filter(p => 
-        p.name?.toLowerCase().includes(lowerTerm) || 
-        p.store?.toLowerCase().includes(lowerTerm)
-      )
-    }
-
-    // 2. Store Filter
-    if (selectedStore !== 'all') {
-      result = result.filter(p => p.store === selectedStore)
-    }
-
-    // 3. Sort
-    result.sort((a, b) => {
-      switch (sortBy) {
-        case 'date-desc':
-          return new Date(b.created_at) - new Date(a.created_at)
-        case 'date-asc':
-          return new Date(a.created_at) - new Date(b.created_at)
-        case 'price-asc':
-          return a.current_price - b.current_price
-        case 'price-desc':
-          return b.current_price - a.current_price
-        case 'name-asc':
-          return (a.name || '').localeCompare(b.name || '')
-        default:
-          return 0
+  useEffect(() => {
+      const fetchStores = async () => {
+          const { data } = await supabase.from('products').select('store')
+          const stores = new Set(data?.map(p => p.store).filter(Boolean))
+          setUniqueStores(['all', ...stores])
       }
-    })
+      fetchStores()
+  }, [])
 
-    return result
-  }, [products, searchTerm, selectedStore, sortBy])
+  // Filtered products are now handled on server
+  const filteredProducts = products
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-8">
@@ -293,6 +315,27 @@ export default function Dashboard() {
               </div>
             ))
           )}
+        </div>
+
+        {/* Pagination Controls */}
+        <div className="flex justify-center items-center mt-8 gap-4">
+            <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1 || loading}
+                className="px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+                Previous
+            </button>
+            <span className="text-gray-400">
+                Page {page} of {Math.max(1, Math.ceil(totalProducts / PAGE_SIZE))}
+            </span>
+            <button
+                onClick={() => setPage(p => p + 1)}
+                disabled={page * PAGE_SIZE >= totalProducts || loading}
+                className="px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+                Next
+            </button>
         </div>
 
         <AddProductModal

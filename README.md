@@ -10,6 +10,7 @@ A full-stack web application that tracks product prices from various online stor
 - **Dashboard**: View all tracked products in one place
 - **Product Details**: See detailed price history and trends for each product
 - **Real-time Data**: Powered by Supabase for real-time database synchronization
+- **Smart Notifications**: get notified via Email and Web UI when a price drops below your target
 
 ## Tech Stack
 
@@ -81,7 +82,11 @@ Create `.env` files in both `client` and `server` directories:
 ```env
 PORT=3000
 SUPABASE_URL=your_supabase_url
-SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+# Optional: For Email Notifications (Gmail example)
+EMAIL_USER=your_email@gmail.com
+EMAIL_PASS=your_app_password
+CLIENT_URL=http://localhost:5173
 ```
 
 **client/.env:**
@@ -99,8 +104,14 @@ VITE_API_URL=http://localhost:3000
 ### 4. Supabase Setup
 
 1. Create a new project at [supabase.com](https://supabase.com)
-2. Get your project URL and anon key from Project Settings > API
-3. Set up your database schema (you'll need tables for users and products)
+2. Get your project URL, anon key, and service_role key from Project Settings > API
+3. **Database Schema**: Run the provided SQL scripts in `server/database/` or copy from `server/database/full_schema.sql` (if available) to set up:
+    - `products`: Stores tracked items
+    - `price_history`: Historical price data
+    - `user_settings`: User preferences
+    - `notifications`: User alerts
+    - `supported_domains`: Domain whitelist
+4. **RLS Policies**: Ensure RLS is enabled and policies are applied (see `server/database/policies.sql` and `fix_notifications_policies.sql`)
 
 ## Running the Application
 
