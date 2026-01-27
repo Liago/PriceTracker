@@ -6,13 +6,35 @@ class SmartGenerationScraper extends BaseScraper {
 		const data = await this.getGenericMetadata();
 
 		const pageData = await this.page.evaluate(() => {
+			let jsonLd = {};
+			try {
+				const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+				for (const script of scripts) {
+					const json = JSON.parse(script.innerText);
+					if (json['@type'] === 'Product') {
+						jsonLd = json;
+						break;
+					}
+				}
+			} catch (e) { }
+
 			// Price
 			const priceEl = document.querySelector('.price');
 			let price = priceEl ? priceEl.innerText : null;
+			if (!price && jsonLd.offers) {
+				const offer = Array.isArray(jsonLd.offers) ? jsonLd.offers[0] : jsonLd.offers;
+				if (offer.price) price = offer.price;
+			}
 
 			// Availability
 			const addToCartBtn = document.querySelector('#product-addtocart-button') || document.querySelector('button[title="Aggiungi al Carrello"]');
-			const available = !!addToCartBtn && !addToCartBtn.disabled;
+			let available = !!addToCartBtn && !addToCartBtn.disabled;
+			if (jsonLd.offers) {
+				const offer = Array.isArray(jsonLd.offers) ? jsonLd.offers[0] : jsonLd.offers;
+				if (offer.availability) {
+					available = offer.availability.includes('InStock');
+				}
+			}
 
 			// Features: extract product specifications
 			const features = [];
@@ -38,8 +60,10 @@ class SmartGenerationScraper extends BaseScraper {
 			}
 
 			// Description
+			// Description
 			const descEl = document.querySelector('.product.attribute.description .value') || document.querySelector('.product-info-description') || document.querySelector('[itemprop="description"]');
-			const description = descEl ? descEl.textContent.trim().substring(0, 500) : null;
+			let description = descEl ? descEl.textContent.trim().substring(0, 500) : null;
+			if (!description && jsonLd.description) description = jsonLd.description.substring(0, 500);
 
 			return { price, available, features, description };
 		});

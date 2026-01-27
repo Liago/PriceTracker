@@ -6,21 +6,38 @@ class EbayScraper extends BaseScraper {
 		const data = await this.getGenericMetadata();
 
 		const pageData = await this.page.evaluate(() => {
+			let jsonLd = {};
+			try {
+				const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+				for (const script of scripts) {
+					const json = JSON.parse(script.innerText);
+					if (json['@type'] === 'Product') {
+						jsonLd = json;
+						break;
+					}
+				}
+			} catch (e) { }
+
 			// Title
 			const titleEl = document.querySelector('.x-item-title__mainTitle') || document.querySelector('#itemTitle');
-			const title = titleEl ? titleEl.textContent.replace('Details about', '').trim() : null;
+			const title = titleEl ? titleEl.textContent.replace('Details about', '').trim() : (jsonLd.name || null);
 
 			// Price
 			const priceEl = document.querySelector('.x-price-primary') || document.querySelector('#prcIsum');
-			const price = priceEl ? priceEl.textContent.trim() : null;
+			let price = priceEl ? priceEl.textContent.trim() : null;
+			if (!price && jsonLd.offers) {
+				const offer = Array.isArray(jsonLd.offers) ? jsonLd.offers[0] : jsonLd.offers;
+				if (offer.price) price = offer.price;
+			}
 
 			// Image
 			const imgEl = document.querySelector('.ux-image-carousel-item.image-treatment.active img') || document.querySelector('#icImg');
-			const image = imgEl ? imgEl.src : null;
+			const image = imgEl ? imgEl.src : (jsonLd.image ? (Array.isArray(jsonLd.image) ? jsonLd.image[0] : jsonLd.image) : null);
 
 			// Description from item specifics
 			const descEl = document.querySelector('#desc_div') || document.querySelector('.item-description');
-			const description = descEl ? descEl.textContent.trim().substring(0, 500) : null;
+			let description = descEl ? descEl.textContent.trim().substring(0, 500) : null;
+			if (!description && jsonLd.description) description = jsonLd.description.substring(0, 500);
 
 			// Features: extract item specifics (key-value pairs displayed in a table)
 			const features = [];
@@ -48,7 +65,14 @@ class EbayScraper extends BaseScraper {
 			// Availability
 			const soldEl = document.querySelector('.d-quantity__availability .d-quantity__msg');
 			const soldText = soldEl ? soldEl.textContent.toLowerCase() : '';
-			const available = !soldText.includes('non disponibile') && !soldText.includes('sold out') && !soldText.includes('this item is out of stock');
+			let available = !soldText.includes('non disponibile') && !soldText.includes('sold out') && !soldText.includes('this item is out of stock');
+
+			if (jsonLd.offers) {
+				const offer = Array.isArray(jsonLd.offers) ? jsonLd.offers[0] : jsonLd.offers;
+				if (offer.availability) {
+					available = offer.availability.includes('InStock') || offer.availability.includes('PreOrder');
+				}
+			}
 
 			return { title, price, image, description, features, available };
 		});

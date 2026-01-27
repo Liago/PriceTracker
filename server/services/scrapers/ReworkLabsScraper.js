@@ -4,9 +4,9 @@ class ReworkLabsScraper extends BaseScraper {
 	async scrape(url) {
 		const store = 'reworklabs';
 
-		// Wait for Shopify content to render before extracting data
+		// Wait for Shopify content to render. Increased timeout to 15s to avoid premature failures.
 		try {
-			await this.page.waitForSelector('.product-price, .price, #ProductPrice-product-template', { timeout: 8000 });
+			await this.page.waitForSelector('.product-price, .price, #ProductPrice-product-template', { timeout: 15000 });
 		} catch (_) {
 			// Continue even if the selector isn't found — we'll fall back to OG metadata
 		}
@@ -31,20 +31,60 @@ class ReworkLabsScraper extends BaseScraper {
 			const imgEl = document.querySelector('.product-single__photo img') || document.querySelector('.product__media img') || document.querySelector('.product-featured-img');
 			const image = imgEl ? (imgEl.src || imgEl.getAttribute('data-src')) : null;
 
-			// Description
-			const descEl = document.querySelector('.product-single__description') || document.querySelector('.product__description') || document.querySelector('[data-product-description]');
-			const description = descEl ? descEl.textContent.trim() : null;
+			// Description: Prefer the rich description container if available
+			const richDescEl = document.querySelector('.contenuto-descrizione') || document.querySelector('.product-single__description') || document.querySelector('.product__description');
+			const description = richDescEl ? richDescEl.textContent.trim() : null;
 
-			// Features: extract list items from description
-			const featureEls = descEl ? descEl.querySelectorAll('li') : [];
-			const features = Array.from(featureEls).map(li => li.textContent.trim()).filter(t => t.length > 0);
+			// Features extraction
+			let features = [];
+
+			// Strategy 1: Look for "Caratteristiche principali" list in rich description
+			if (richDescEl) {
+				const headers = richDescEl.querySelectorAll('h3, h4, strong');
+				for (const header of headers) {
+					if (header.textContent.toLowerCase().includes('caratteristiche')) {
+						// Look for the next UL
+						let nextFn = header.nextElementSibling;
+						while (nextFn && nextFn.tagName !== 'UL' && nextFn.tagName !== 'H3') {
+							nextFn = nextFn.nextElementSibling;
+						}
+						if (nextFn && nextFn.tagName === 'UL') {
+							features = Array.from(nextFn.querySelectorAll('li')).map(li => li.textContent.trim());
+							break;
+						}
+					}
+				}
+
+				// If no specific header found, try to just grab all LIs if reasonable amount
+				if (features.length === 0) {
+					const allLis = richDescEl.querySelectorAll('ul li');
+					if (allLis.length > 0 && allLis.length < 20) {
+						features = Array.from(allLis).map(li => li.textContent.trim());
+					}
+				}
+			}
+
+			// Strategy 2: Fallback to parsing the short description paragraph (Key: Value)
+			// e.g. "Famiglia processore: Apple M, Modello del processore: M1."
+			if (features.length === 0) {
+				const shortDescEl = document.querySelector('.woocommerce-product-details__short-description p');
+				if (shortDescEl) {
+					const text = shortDescEl.textContent;
+					// Split by period or comma, but filter for likely features (containing ":")
+					const parts = text.split(/[.,]\s+/);
+					// Filter for parts that look like "Key: Value"
+					const potentialFeatures = parts.filter(p => p.includes(':') && p.trim().length > 3);
+					if (potentialFeatures.length > 2) {
+						features = potentialFeatures.map(p => p.trim());
+					}
+				}
+			}
 
 			return { priceText, available, title, image, description, features };
 		});
 
 		if (pageData.priceText) {
 			// Regex to extract the last price occurrence (usually the discounted/current one)
-			// Matches 949,00 or 1.099,00
 			const matches = pageData.priceText.match(/[\d\.]+,[\d]{2}/g);
 			if (matches && matches.length > 0) {
 				data.price = matches[matches.length - 1];
@@ -53,6 +93,7 @@ class ReworkLabsScraper extends BaseScraper {
 
 		if (pageData.title) data.title = pageData.title;
 		if (pageData.image) data.image = pageData.image;
+		// Keep the detailed description as main description if found, otherwise use default
 		if (pageData.description) data.description = pageData.description;
 		data.available = pageData.available;
 

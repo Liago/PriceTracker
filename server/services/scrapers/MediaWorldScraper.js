@@ -6,11 +6,25 @@ class MediaWorldScraper extends BaseScraper {
 		const data = await this.getGenericMetadata();
 
 		const pageData = await this.page.evaluate(() => {
+			let jsonLd = {};
+			try {
+				const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+				for (const script of scripts) {
+					const json = JSON.parse(script.innerText);
+					if (json['@type'] === 'Product') {
+						jsonLd = json;
+						break;
+					}
+				}
+			} catch (e) { }
+
 			// Price
 			let price = null;
-			const priceEl = document.querySelector('[data-test="product-price"]');
 			if (priceEl) {
 				price = priceEl.innerText;
+			} else if (jsonLd.offers) {
+				const offer = Array.isArray(jsonLd.offers) ? jsonLd.offers[0] : jsonLd.offers;
+				if (offer.price) price = offer.price;
 			} else {
 				const metaPrice = document.querySelector('meta[itemprop="price"]');
 				if (metaPrice) price = metaPrice.content;
@@ -18,7 +32,14 @@ class MediaWorldScraper extends BaseScraper {
 
 			// Availability
 			const addToCartBtn = document.querySelector('[data-test="add-to-cart-button"]');
-			const available = !!addToCartBtn && !addToCartBtn.disabled;
+			let available = !!addToCartBtn && !addToCartBtn.disabled;
+
+			if (jsonLd.offers) {
+				const offer = Array.isArray(jsonLd.offers) ? jsonLd.offers[0] : jsonLd.offers;
+				if (offer.availability) {
+					available = offer.availability.includes('InStock') || offer.availability.includes('PreOrder');
+				}
+			}
 
 			// Features: extract product specifications
 			const features = [];
@@ -48,7 +69,8 @@ class MediaWorldScraper extends BaseScraper {
 
 			// Description
 			const descEl = document.querySelector('[data-test="product-description"]') || document.querySelector('[class*="product-description"]') || document.querySelector('[itemprop="description"]');
-			const description = descEl ? descEl.textContent.trim().substring(0, 500) : null;
+			let description = descEl ? descEl.textContent.trim().substring(0, 500) : null;
+			if (!description && jsonLd.description) description = jsonLd.description.substring(0, 500);
 
 			return { price, available, features, description };
 		});
