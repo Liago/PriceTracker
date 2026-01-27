@@ -11,6 +11,8 @@
     "express-rate-limit": "^8.2.1",
     "nodemailer": "^7.0.11",
     "puppeteer-core": "^22.6.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "serverless-http": "^3.2.0"
   },
   "scripts": {
