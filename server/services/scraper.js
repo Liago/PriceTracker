@@ -46,6 +46,17 @@ async function scrapeProduct(url) {
 			'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
 		});
 
+		// Optimize performance by blocking unnecessary resources
+		await page.setRequestInterception(true);
+		page.on('request', (req) => {
+			const resourceType = req.resourceType();
+			if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+				req.abort();
+			} else {
+				req.continue();
+			}
+		});
+
 		// Domain specific cookies (e.g. for Amazon session)
 		const domain = new URL(url).hostname;
 		await page.setCookie({
