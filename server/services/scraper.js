@@ -94,7 +94,7 @@ async function scrapeProduct(url) {
 			console.warn(`[CAPTCHA DETECTED] Potential CAPTCHA on ${url} (Title: ${pageTitle})`);
 		}
 
-		await new Promise(resolve => setTimeout(resolve, 3000));
+
 
 		// USE FACTORY TO GET STRATEGY
 		const scraper = ScraperFactory.getScraper(url, page);

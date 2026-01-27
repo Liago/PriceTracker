@@ -6,7 +6,7 @@ class ReworkLabsScraper extends BaseScraper {
 
 		// Wait for Shopify content to render. Increased timeout to 15s to avoid premature failures.
 		try {
-			await this.page.waitForSelector('.product-price, .price, #ProductPrice-product-template', { timeout: 15000 });
+			await this.page.waitForSelector('.product-price, .price, #ProductPrice-product-template', { timeout: 7000 });
 		} catch (_) {
 			// Continue even if the selector isn't found — we'll fall back to OG metadata
 		}
