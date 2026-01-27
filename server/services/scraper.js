@@ -1,4 +1,9 @@
-const puppeteer = require('puppeteer-core');
+const puppeteerCore = require('puppeteer-core');
+const { addExtra } = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+
+const puppeteer = addExtra(puppeteerCore);
+puppeteer.use(StealthPlugin());
 const ScraperFactory = require('./scrapers/ScraperFactory');
 
 async function scrapeProduct(url) {
@@ -76,6 +81,17 @@ async function scrapeProduct(url) {
 			// before the full load completes.
 			if (navError.name !== 'TimeoutError') throw navError;
 			console.warn(`Navigation timeout for ${url}, proceeding with partial load`);
+		}
+
+		// Check for CAPTCHA
+		const pageTitle = await page.title();
+		if (
+			pageTitle.toLowerCase().includes('captcha') ||
+			pageTitle.toLowerCase().includes('security check') ||
+			pageTitle.toLowerCase().includes('robot') ||
+			pageTitle.toLowerCase().includes('challenge')
+		) {
+			console.warn(`[CAPTCHA DETECTED] Potential CAPTCHA on ${url} (Title: ${pageTitle})`);
 		}
 
 		await new Promise(resolve => setTimeout(resolve, 3000));
