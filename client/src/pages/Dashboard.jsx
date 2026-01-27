@@ -10,7 +10,11 @@ import { parsePrice } from '../lib/utils'
 export default function Dashboard() {
   /* New Dashboard without Header components */
   const { user } = useAuth()
-  const [viewMode, setViewMode] = useState('grid')
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem('viewMode') || 'grid')
+
+  useEffect(() => {
+    localStorage.setItem('viewMode', viewMode)
+  }, [viewMode])
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
   const [deleteProductId, setDeleteProductId] = useState(null)
