@@ -51,11 +51,12 @@ Le priorità sono state aggiornate considerando l'analisi più recente. I test, 
   - Gestione letto/non letto.
 - [x] **Supporto Nuovi Store**:
   - eBay, MediaWorld, Unieuro, Zalando, AliExpress, ePrice.
-- [ ] **Gestione CAPTCHA & Scraping Avanzato**:
+- [x] **Gestione CAPTCHA & Scraping Avanzato**:
+  - Rotazione User-Agent.
+  - Supporto Proxy (opzionale).
+  - Enhanced CAPTCHA detection & logging.
+  - Retry logic con exponential backoff.
 
-  - Integrazione servizi solving (2Captcha).
-  - Rotazione User-Agent e Proxy.
-  - Browser fingerprinting.
 - [ ] **Paginazione Dashboard**:
   - Server-side pagination con Supabase.
   - Infinite scroll (mobile) vs Paginazione classica.
