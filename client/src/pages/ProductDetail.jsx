@@ -326,7 +326,7 @@ export default function ProductDetail() {
                     <button
                       onClick={handleSaveSettings}
                       disabled={saving}
-                      className="btn btn-primary flex-1 gap-2 h-12 text-base font-bold shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40 border-none bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 transition-all rounded-xl"
+                      className="flex-1 flex items-center justify-center gap-2 h-12 text-base font-bold text-white shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40 border-none bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 transition-all rounded-xl disabled:opacity-70 disabled:cursor-not-allowed"
                     >
                       {saving ? (
                         <>
@@ -335,8 +335,8 @@ export default function ProductDetail() {
                         </>
                       ) : (
                         <>
-                          <Save size={20} className="mb-0.5" />
-                          Save Changes
+                          <Save size={20} />
+                          <span>Save Changes</span>
                         </>
                       )}
                     </button>
