@@ -6,6 +6,10 @@ const ReworkLabsScraper = require('./ReworkLabsScraper');
 const RefurbedScraper = require('./RefurbedScraper');
 const SmartGenerationScraper = require('./SmartGenerationScraper');
 const JuiceScraper = require('./JuiceScraper');
+const UnieuroScraper = require('./UnieuroScraper');
+const EPriceScraper = require('./EPriceScraper');
+const ZalandoScraper = require('./ZalandoScraper');
+const AliExpressScraper = require('./AliExpressScraper');
 const BaseScraper = require('./BaseScraper');
 
 class ScraperFactory {
@@ -28,6 +32,14 @@ class ScraperFactory {
 			return new SmartGenerationScraper(page);
 		} else if (hostname.includes('juice.it')) {
 			return new JuiceScraper(page);
+		} else if (hostname.includes('unieuro.it')) {
+			return new UnieuroScraper(page);
+		} else if (hostname.includes('eprice.it')) {
+			return new EPriceScraper(page);
+		} else if (hostname.includes('zalando.')) {
+			return new ZalandoScraper(page);
+		} else if (hostname.includes('aliexpress.')) {
+			return new AliExpressScraper(page);
 		} else {
 			return new BaseScraper(page);
 		}
@@ -35,3 +47,4 @@ class ScraperFactory {
 }
 
 module.exports = ScraperFactory;
+

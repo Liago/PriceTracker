@@ -45,13 +45,14 @@ Le priorità sono state aggiornate considerando l'analisi più recente. I test, 
 ## 🟠 Priorità Alta (Pianificare a breve)
 
 ### Funzionalità Core Mancanti
-- [ ] **UI Sistema Notifiche**:
+- [x] **UI Sistema Notifiche**:
   - `NotificationBell` con badge.
   - Pagina `/notifications` per storico.
   - Gestione letto/non letto.
-- [ ] **Supporto Nuovi Store**:
+- [x] **Supporto Nuovi Store**:
   - eBay, MediaWorld, Unieuro, Zalando, AliExpress, ePrice.
 - [ ] **Gestione CAPTCHA & Scraping Avanzato**:
+
   - Integrazione servizi solving (2Captcha).
   - Rotazione User-Agent e Proxy.
   - Browser fingerprinting.
