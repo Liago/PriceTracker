@@ -237,9 +237,14 @@ export default function ProductDetail() {
                 </a>
               </div>
 
-              <div className="stats shadow bg-gray-800/40 border border-gray-700/50 backdrop-blur-md overflow-visible">
-                <div className="stat relative">
-                  <div className="stat-title text-gray-400 font-medium tracking-wide uppercase text-xs mb-1">Current Price</div>
+              <div className="card bg-gradient-to-br from-gray-800/80 to-gray-900/80 border border-gray-700/50 p-6 rounded-2xl shadow-xl">
+                <div className="stat relative p-0">
+                  <div className="stat-title text-gray-400 font-bold tracking-wider uppercase text-xs mb-4 flex items-center gap-2">
+                    <div className="p-1.5 bg-green-500/20 rounded-lg text-green-400">
+                      <span className="text-lg font-bold">€</span>
+                    </div>
+                    Current Price
+                  </div>
 
                   {refreshing ? (
                     <div className="flex flex-col gap-3 py-2">
@@ -321,7 +326,7 @@ export default function ProductDetail() {
                     <button
                       onClick={handleSaveSettings}
                       disabled={saving}
-                      className="btn btn-primary flex-1 gap-2 h-12 text-base font-bold shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40 border-none bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 transition-all"
+                      className="btn btn-primary flex-1 gap-2 h-12 text-base font-bold shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40 border-none bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 transition-all rounded-xl"
                     >
                       {saving ? (
                         <>
@@ -330,7 +335,7 @@ export default function ProductDetail() {
                         </>
                       ) : (
                         <>
-                          <Save size={18} />
+                          <Save size={20} className="mb-0.5" />
                           Save Changes
                         </>
                       )}
