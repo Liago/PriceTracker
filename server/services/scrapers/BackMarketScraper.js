@@ -7,6 +7,9 @@ class BackMarketScraper extends BaseScraper {
 
 		const pageData = await this.page.evaluate(() => {
 			let jsonLd = {};
+			let nextData = {};
+
+			// 1. Try JSON-LD
 			try {
 				const scripts = document.querySelectorAll('script[type="application/ld+json"]');
 				for (const script of scripts) {
@@ -18,14 +21,35 @@ class BackMarketScraper extends BaseScraper {
 				}
 			} catch (e) { }
 
+			// 2. Try NEXT_DATA (BackMarket often puts full state here)
+			try {
+				const nextScript = document.getElementById('__NEXT_DATA__');
+				if (nextScript) {
+					const json = JSON.parse(nextScript.innerText);
+					// Navigate to product data in nextData structure (adjust path as needed based on inspection)
+					// Common path: props.pageProps.product
+					if (json.props && json.props.pageProps && json.props.pageProps.product) {
+						nextData = json.props.pageProps.product;
+					} else if (json.props && json.props.pageProps && json.props.pageProps.initialState && json.props.pageProps.initialState.product) {
+						nextData = json.props.pageProps.initialState.product;
+					}
+				}
+			} catch (e) { }
+
 			// Data Extraction via DOM (Fallback/Complementary)
 			const getText = (selector) => {
 				const el = document.querySelector(selector);
 				return el ? el.innerText.trim() : null;
 			};
 
+			// Check for Cloudflare/Bot Challenge
+			if (document.title.includes('Just a moment') || document.title.includes('Challenge') || document.body.innerText.includes('Turnstile')) {
+				return { isBlocked: true };
+			}
+
 			// Title
 			let title = getText('[data-qa="product-title"]') || getText('h1');
+			if (!title && nextData.title) title = nextData.title;
 
 			// Price
 			// Try to find the price in the main price box
@@ -35,8 +59,11 @@ class BackMarketScraper extends BaseScraper {
 				if (offer.price) price = offer.price;
 			}
 
-			// Normalize price if found in DOM (e.g., "€ 259,00" -> "259.00")
-			// We'll let the main logic handle the regex parsing, just return the raw string here if from DOM
+			// NEXT_DATA price fallback
+			if (!price && nextData) {
+				// Price might be in different fields depending on structure (e.g. price.amount)
+				if (nextData.price && nextData.price.amount) price = nextData.price.amount;
+			}
 
 			// Availability
 			// Check for "Add to cart" button presence and state
@@ -45,7 +72,7 @@ class BackMarketScraper extends BaseScraper {
 
 			// Check for "Out of stock" indicators
 			if (document.body.innerText.includes('Esaurito') || document.body.innerText.includes('Out of stock')) {
-				// Double check specific elements if possible, but button check is usually reliable
+				available = false;
 			}
 
 			if (jsonLd.offers) {
@@ -55,6 +82,10 @@ class BackMarketScraper extends BaseScraper {
 				}
 			}
 
+			if (nextData && nextData.stock && nextData.stock.available !== undefined) {
+				available = nextData.stock.available;
+			}
+
 			// Description
 			let description = getText('[data-qa="product-description"]');
 			if (!description) {
@@ -62,6 +93,8 @@ class BackMarketScraper extends BaseScraper {
 				if (descEl) description = descEl.innerText.trim();
 			}
 			if (!description && jsonLd.description) description = jsonLd.description;
+			if (!description && nextData.description) description = nextData.description;
+
 			if (description && description.length > 500) description = description.substring(0, 500) + '...';
 
 			// Features / Specifications
@@ -85,15 +118,36 @@ class BackMarketScraper extends BaseScraper {
 				});
 			}
 
+			if (features.length === 0 && nextData.specifications) {
+				// Assuming specifications is an array or object in NEXT_DATA
+				if (Array.isArray(nextData.specifications)) {
+					nextData.specifications.forEach(spec => features.push(`${spec.name}: ${spec.value}`));
+				}
+			}
+
 			// Images
 			// Usually grabbed by getGenericMetadata (og:image), but let's be specific
 			let image = null;
-			if (jsonLd.image) {
+			const imgEl = document.querySelector('img[data-qa="product-image"]');
+			if (imgEl) image = imgEl.src;
+
+			if (!image && jsonLd.image) {
 				image = Array.isArray(jsonLd.image) ? jsonLd.image[0] : jsonLd.image;
 			}
+			if (!image && nextData.imageUrl) image = nextData.imageUrl;
+			if (!image && nextData.images && nextData.images.length > 0) image = nextData.images[0];
 
-			return { title, price, available, description, features, image };
+
+			return { title, price, available, description, features, image, isBlocked: false };
 		});
+
+		if (pageData.isBlocked) {
+			console.warn(`[BackMarketScraper] Blocked by anti-bot protection for URL: ${url}`);
+			// Start interactive mode or return error? For now, let's return what we have (likely nothing correct) 
+			// but maybe availabe = false helps trigger "check later".
+			// Actually, if blocked, we should probably throw or return a specific error code if the system supports it.
+			// For now, logging it is key.
+		}
 
 		// Post-processing
 		if (pageData.title && (!data.title || data.title.length < pageData.title.length)) {
@@ -143,6 +197,7 @@ class BackMarketScraper extends BaseScraper {
 		}
 
 		return { ...data, store, details };
+
 	}
 }
 
