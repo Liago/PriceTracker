@@ -10,6 +10,7 @@ const UnieuroScraper = require('./UnieuroScraper');
 const EPriceScraper = require('./EPriceScraper');
 const ZalandoScraper = require('./ZalandoScraper');
 const AliExpressScraper = require('./AliExpressScraper');
+const BackMarketScraper = require('./BackMarketScraper');
 const BaseScraper = require('./BaseScraper');
 
 class ScraperFactory {
@@ -40,6 +41,8 @@ class ScraperFactory {
 			return new ZalandoScraper(page);
 		} else if (hostname.includes('aliexpress.')) {
 			return new AliExpressScraper(page);
+		} else if (hostname.includes('backmarket.')) {
+			return new BackMarketScraper(page);
 		} else {
 			return new BaseScraper(page);
 		}
