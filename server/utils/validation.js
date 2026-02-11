@@ -29,7 +29,9 @@ const ALLOWED_DOMAINS = [
 	'ebay.it',
 	'www.ebay.it',
 	'mediaworld.it',
-	'www.mediaworld.it'
+	'www.mediaworld.it',
+	'backmarket.it',
+	'www.backmarket.it'
 ];
 
 

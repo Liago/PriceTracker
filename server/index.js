@@ -5,6 +5,9 @@ const env = require('./config/env');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.set('trust proxy', 1); // Trust first proxy (Netlify)
+
+
 // CORS Configuration
 const allowedOrigins = [
 	'http://localhost:5173', // Vite client
