@@ -9,6 +9,7 @@ const ScraperFactory = require('./scrapers/ScraperFactory');
 const { userAgentManager } = require('../utils/userAgentManager');
 const { createProxyManagerFromEnv } = require('../utils/proxyManager');
 const { captchaDetector } = require('../utils/captchaDetector');
+const { resolveLocalExecutablePath } = require('../utils/browserPath');
 
 // Configuration
 const MAX_RETRIES = parseInt(process.env.SCRAPER_MAX_RETRIES || '3', 10);
@@ -67,11 +68,19 @@ async function createBrowser(proxy = null) {
 		});
 	} else {
 		// Local Development
-		const localExecutablePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+		const localExecutablePath = resolveLocalExecutablePath();
+		if (localExecutablePath) {
+			console.log(`[Scraper] Chrome locale: ${localExecutablePath}`);
+		} else {
+			console.log('[Scraper] Nessun Chrome trovato nei path noti, risoluzione lasciata a puppeteer (channel: chrome)');
+		}
 
 		return puppeteer.launch({
 			channel: 'chrome',
-			executablePath: localExecutablePath,
+			// Omesso quando non risolto: in puppeteer-core executablePath ha la
+			// precedenza su channel, quindi passarlo undefined e' cio' che
+			// permette al fallback per channel di entrare in gioco.
+			...(localExecutablePath ? { executablePath: localExecutablePath } : {}),
 			headless: 'new',
 			args: [
 				'--no-sandbox',
