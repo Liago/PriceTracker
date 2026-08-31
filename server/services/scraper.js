@@ -10,10 +10,17 @@ const { userAgentManager } = require('../utils/userAgentManager');
 const { createProxyManagerFromEnv } = require('../utils/proxyManager');
 const { captchaDetector } = require('../utils/captchaDetector');
 const { resolveLocalExecutablePath } = require('../utils/browserPath');
+const { runPipeline } = require('../scrape/pipeline');
+const { compareResults, logComparison } = require('../scrape/shadow');
 
 // Configuration
 const MAX_RETRIES = parseInt(process.env.SCRAPER_MAX_RETRIES || '3', 10);
 const RETRY_DELAY_BASE = parseInt(process.env.SCRAPER_RETRY_DELAY || '1000', 10);
+
+// Shadow mode (fase 2 del design doc): la pipeline generica gira accanto agli
+// scraper dedicati senza scrivere nulla, e ogni esecuzione confronta i due
+// risultati. Attivo di default; si disattiva con SCRAPE_SHADOW_MODE=off.
+const SHADOW_MODE = process.env.SCRAPE_SHADOW_MODE !== 'off';
 
 // Initialize proxy manager
 const proxyManager = createProxyManagerFromEnv();
@@ -194,6 +201,25 @@ async function scrapeProduct(url, attempt = 0) {
 			proxyUsed: !!proxy,
 			captchaDetected: captchaResult.detected,
 		};
+
+		// Shadow mode: osservazione, mai decisione. Qualunque cosa accada qui
+		// dentro non deve poter cambiare il risultato restituito ne' far
+		// fallire lo scrape, percio' e' interamente racchiuso in un try/catch.
+		let shadow = null;
+		if (SHADOW_MODE) {
+			try {
+				const html = await page.content();
+				const pipelineResult = runPipeline(html, {
+					url,
+					antiBotDetected: captchaResult.detected,
+				});
+				shadow = compareResults({ legacy: data, pipeline: pipelineResult, url });
+				logComparison(shadow);
+			} catch (shadowError) {
+				console.warn('[Shadow] Confronto non riuscito:', shadowError.message);
+			}
+		}
+		data.shadow = shadow;
 
 		await browser.close();
 		return data;
