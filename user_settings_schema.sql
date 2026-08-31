@@ -1,3 +1,9 @@
+-- SUPERATO da server/database/migrations/000_baseline.sql
+--
+-- Questo file resta come riferimento storico ma NON va piu' eseguito a mano:
+-- lo schema e' ora versionato e si applica con `npm run migrate` dalla
+-- cartella server/. Vedi server/database/migrations/README.md.
+
 -- Create user_settings table
 create table user_settings (
   id uuid default uuid_generate_v4() primary key,

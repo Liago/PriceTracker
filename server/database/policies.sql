@@ -1,3 +1,7 @@
+-- SUPERATO da server/database/migrations/000_baseline.sql, che include queste
+-- stesse policy. Resta come riferimento; per applicare lo schema usare
+-- `npm run migrate` dalla cartella server/.
+
 -- Database Policies
 -- This file contains all Row Level Security (RLS) policies for the application.
 -- Run this against your Supabase database to ensure all permissions are correct.

@@ -1,3 +1,7 @@
+-- SUPERATO da server/database/migrations/000_baseline.sql, che include queste
+-- stesse policy. Resta come riferimento; per applicare lo schema usare
+-- `npm run migrate` dalla cartella server/.
+
 -- Enable RLS
 alter table notifications enable row level security;
 
