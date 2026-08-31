@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import checkerModule from '../services/productChecker.js';
 
-const { checkProduct, confidenceOf, CONFIDENCE } = checkerModule;
+const { checkProduct, confidenceOf } = checkerModule;
 
 /** Repository finto che registra tutto cio' che viene scritto. */
 function fakeRepo({ history = [] } = {}) {
@@ -37,10 +37,17 @@ const product = (overrides = {}) => ({
 	...overrides,
 });
 
-/** Scrape finto che concorda con la pipeline (shadow match). */
+/**
+ * Scrape finto nella forma che la pipeline produce dalla fase 5: prezzo gia'
+ * numerico, confidenza calcolata dal motore, provenienza del campo.
+ */
 const scrapeOk = (price, extra = {}) => async () => ({
-	price, currency: 'EUR', available: true,
-	shadow: { agreement: 'match' },
+	priceValue: price,
+	price,
+	currency: 'EUR',
+	availability: 'in_stock',
+	confidence: 0.88,
+	fields: { price: { source: 'jsonld' } },
 	...extra,
 });
 
@@ -49,24 +56,24 @@ const storico = (...prices) => prices.map((price, index) => ({
 }));
 
 describe('confidenceOf', () => {
-	it('l\'accordo fra scraper e pipeline vale piu\' dello scraper da solo', () => {
-		// Due implementazioni indipendenti che concordano sono un'evidenza
-		// vera, e vengono usate come tale finche' la pipeline e' in shadow.
-		expect(confidenceOf({ shadow: { agreement: 'match' } }).confidence).toBe(CONFIDENCE.AGREEMENT);
-		expect(confidenceOf({}).confidence).toBe(CONFIDENCE.LEGACY_ONLY);
+	it('usa la confidenza calcolata dalla pipeline', () => {
+		const out = confidenceOf({ confidence: 0.93, fields: { price: { source: 'platform' } } });
+		expect(out.confidence).toBe(0.93);
+		expect(out.source).toBe('platform');
 	});
 
-	it('il disaccordo abbassa la confidenza sotto la soglia di accettazione', () => {
-		const { confidence } = confidenceOf({ shadow: { agreement: 'mismatch' } });
-		expect(confidence).toBe(CONFIDENCE.DISAGREEMENT);
-		expect(confidence).toBeLessThan(0.6);
+	it('un risultato senza confidenza non e\' interpretabile', () => {
+		// Meglio zero che un valore inventato: zero manda in quarantena, un
+		// valore inventato farebbe scrivere un prezzo di cui non si sa nulla.
+		expect(confidenceOf({}).confidence).toBe(0);
+		expect(confidenceOf(null).confidence).toBe(0);
 	});
 });
 
 describe('checkProduct - prezzo accettato', () => {
 	it('scrive il prezzo e aggiorna la salute', async () => {
 		const repo = fakeRepo({ history: storico(729, 730, 728) });
-		const out = await checkProduct({ product: product(), scrape: scrapeOk('699,00 €'), repo });
+		const out = await checkProduct({ product: product(), scrape: scrapeOk(699), repo });
 
 		expect(out.accepted).toBe(true);
 		expect(out.price).toBe(699);
@@ -76,7 +83,7 @@ describe('checkProduct - prezzo accettato', () => {
 
 	it('registra un\'osservazione accettata', async () => {
 		const repo = fakeRepo({ history: storico(729) });
-		await checkProduct({ product: product(), scrape: scrapeOk('699,00 €'), repo });
+		await checkProduct({ product: product(), scrape: scrapeOk(699), repo });
 
 		const obs = repo.written.observations[0];
 		expect(obs.accepted).toBe(true);
@@ -86,20 +93,20 @@ describe('checkProduct - prezzo accettato', () => {
 
 	it('scrive nella storia solo se il prezzo e\' cambiato', async () => {
 		const invariato = fakeRepo({ history: storico(729) });
-		await checkProduct({ product: product(), scrape: scrapeOk('729,00 €'), repo: invariato });
+		await checkProduct({ product: product(), scrape: scrapeOk(729), repo: invariato });
 		expect(invariato.written.priceHistory).toHaveLength(0);
 		// ma l'osservazione c'e' comunque: e' la differenza fra "stabile" e "rotto"
 		expect(invariato.written.observations).toHaveLength(1);
 
 		const cambiato = fakeRepo({ history: storico(729) });
-		await checkProduct({ product: product(), scrape: scrapeOk('699,00 €'), repo: cambiato });
+		await checkProduct({ product: product(), scrape: scrapeOk(699), repo: cambiato });
 		expect(cambiato.written.priceHistory).toHaveLength(1);
 	});
 
 	it('notifica quando il prezzo scende sotto la soglia', async () => {
 		const repo = fakeRepo({ history: storico(729) });
 		const out = await checkProduct({
-			product: product({ target_price: 700 }), scrape: scrapeOk('699,00 €'), repo,
+			product: product({ target_price: 700 }), scrape: scrapeOk(699), repo,
 		});
 
 		expect(out.notified).toBe(true);
@@ -109,7 +116,7 @@ describe('checkProduct - prezzo accettato', () => {
 	it('non notifica due volte se il prezzo era gia\' sotto la soglia', async () => {
 		const repo = fakeRepo({ history: storico(650) });
 		const out = await checkProduct({
-			product: product({ current_price: 650, target_price: 700 }), scrape: scrapeOk('649,00 €'), repo,
+			product: product({ current_price: 650, target_price: 700 }), scrape: scrapeOk(649), repo,
 		});
 
 		expect(out.priceChanged).toBe(true);
@@ -122,7 +129,7 @@ describe('checkProduct - la regola d\'oro: un fallimento non scrive mai un prezz
 		// Il caso reale: lo scraper aggancia il costo di spedizione.
 		const repo = fakeRepo({ history: storico(729, 730, 728) });
 		const out = await checkProduct({
-			product: product(), scrape: scrapeOk('4,99 €'), repo,
+			product: product(), scrape: scrapeOk(4.99), repo,
 		});
 
 		expect(out.accepted).toBe(false);
@@ -132,7 +139,7 @@ describe('checkProduct - la regola d\'oro: un fallimento non scrive mai un prezz
 
 	it('ma lo registra come osservazione respinta, con il motivo', async () => {
 		const repo = fakeRepo({ history: storico(729, 730, 728) });
-		await checkProduct({ product: product(), scrape: scrapeOk('4,99 €'), repo });
+		await checkProduct({ product: product(), scrape: scrapeOk(4.99), repo });
 
 		const obs = repo.written.observations[0];
 		expect(obs.accepted).toBe(false);
@@ -158,18 +165,20 @@ describe('checkProduct - la regola d\'oro: un fallimento non scrive mai un prezz
 	it('un prezzo illeggibile non azzera il prezzo buono', async () => {
 		const repo = fakeRepo({ history: storico(729) });
 		const out = await checkProduct({
-			product: product(), scrape: async () => ({ price: 'Non disponibile', available: false }), repo,
+			product: product(),
+			scrape: async () => ({ priceValue: null, availability: 'out_of_stock', confidence: 0.9 }),
+			repo,
 		});
 
 		expect(out.price).toBeNull();
 		expect(repo.written.productPatches[0].patch.current_price).toBeUndefined();
 	});
 
-	it('il disaccordo fra scraper e pipeline manda in quarantena', async () => {
+	it('una confidenza bassa manda in quarantena', async () => {
 		const repo = fakeRepo({ history: storico(729) });
 		const out = await checkProduct({
 			product: product(),
-			scrape: async () => ({ price: '699,00 €', currency: 'EUR', shadow: { agreement: 'mismatch' } }),
+			scrape: async () => ({ priceValue: 699, currency: 'EUR', confidence: 0.45 }),
 			repo,
 		});
 
@@ -202,7 +211,7 @@ describe('checkProduct - salute del tracking', () => {
 	it('un successo azzera i fallimenti', async () => {
 		const repo = fakeRepo({ history: storico(729) });
 		await checkProduct({
-			product: product({ consecutive_failures: 4 }), scrape: scrapeOk('729,00 €'), repo,
+			product: product({ consecutive_failures: 4 }), scrape: scrapeOk(729), repo,
 		});
 
 		expect(repo.written.productPatches[0].patch.consecutive_failures).toBe(0);
@@ -213,7 +222,7 @@ describe('checkProduct - salute del tracking', () => {
 		const repo = fakeRepo({ history: storico(729) });
 		const out = await checkProduct({
 			product: product({ gtin: '0194253000000' }),
-			scrape: scrapeOk('199,00 €', { gtin: '9999999999999' }),
+			scrape: scrapeOk(199, { gtin: '9999999999999' }),
 			repo,
 		});
 
@@ -226,7 +235,7 @@ describe('checkProduct - salute del tracking', () => {
 describe('checkProduct - offerte', () => {
 	it('crea l\'offerta default per una pagina senza varianti', async () => {
 		const repo = fakeRepo({ history: [] });
-		const out = await checkProduct({ product: product(), scrape: scrapeOk('729,00 €'), repo });
+		const out = await checkProduct({ product: product(), scrape: scrapeOk(729), repo });
 
 		expect(out.offerKey).toBe('default');
 	});
@@ -235,7 +244,7 @@ describe('checkProduct - offerte', () => {
 		const repo = fakeRepo({ history: [] });
 		const out = await checkProduct({
 			product: product(),
-			scrape: scrapeOk('379,00 €', { details: { seller: 'Back Market', condition: 'ottimo' } }),
+			scrape: scrapeOk(379, { details: { seller: 'Back Market', condition: 'ottimo' } }),
 			repo,
 		});
 
@@ -244,11 +253,11 @@ describe('checkProduct - offerte', () => {
 
 	it('aggiorna l\'offerta solo su prezzo accettato', async () => {
 		const respinto = fakeRepo({ history: storico(729, 730, 728) });
-		await checkProduct({ product: product(), scrape: scrapeOk('4,99 €'), repo: respinto });
+		await checkProduct({ product: product(), scrape: scrapeOk(4.99), repo: respinto });
 		expect(respinto.written.offerPatches).toHaveLength(0);
 
 		const accettato = fakeRepo({ history: storico(729) });
-		await checkProduct({ product: product(), scrape: scrapeOk('699,00 €'), repo: accettato });
+		await checkProduct({ product: product(), scrape: scrapeOk(699), repo: accettato });
 		expect(accettato.written.offerPatches).toHaveLength(1);
 	});
 });

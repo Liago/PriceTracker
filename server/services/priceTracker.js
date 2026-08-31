@@ -13,6 +13,8 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 const { normalizeUserSettings } = require('./userSettings');
 const { checkProduct } = require('./productChecker');
 const { createTrackingRepository } = require('./trackingRepository');
+const { createRecipeStore } = require('../scrape/recipe/store');
+const { learnRecipe } = require('../scrape/recipe/learner');
 
 async function getUserSettings(userId) {
 	const { data, error } = await supabaseAdmin
@@ -34,6 +36,7 @@ async function checkProductPrices() {
 	console.log('[Price Tracker] Starting price check...');
 
 	const repo = createTrackingRepository(supabaseAdmin);
+	const recipes = createRecipeStore({ client: supabaseAdmin });
 
 	try {
 		// Fetch all active products (monitoring_until is null or in the future)
@@ -77,9 +80,37 @@ async function checkProductPrices() {
 
 					console.log(`[Price Tracker] Controllo: ${product.name}`);
 
+					// Ricetta attiva del dominio: se c'e', lo scrape prende il fast
+					// path e salta la scoperta completa.
+					const recipe = await recipes.getActiveRecipe(product.url);
+
+					let lastResult = null;
+					const scrape = async (url) => {
+						lastResult = await scrapeProduct(url, {
+							recipe,
+							lastKnownPrice: product.current_price ?? null,
+						});
+						return lastResult;
+					};
+
 					// La decisione sta in productChecker, la scrittura nel repository.
 					// Qui resta solo l'orchestrazione.
-					const outcome = await checkProduct({ product, scrape: scrapeProduct, repo });
+					const outcome = await checkProduct({ product, scrape, repo });
+
+					// Il ciclo di apprendimento: la ricetta guadagna o perde
+					// credito a seconda di come e' andata, e una scoperta
+					// riuscita su un dominio senza ricetta ne genera una.
+					if (recipe) {
+						await recipes.recordOutcome(recipe, outcome.accepted);
+					} else if (outcome.accepted && lastResult) {
+						const { recipe: learned } = learnRecipe(lastResult, { url: product.url });
+						if (learned) {
+							const { saved } = await recipes.saveLearnedRecipe(learned);
+							if (saved) {
+								console.log(`[Price Tracker] Ricetta appresa per ${learned.domain} (v${saved.version})`);
+							}
+						}
+					}
 
 					if (outcome.accepted) {
 						console.log(

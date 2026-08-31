@@ -11,6 +11,7 @@ const { reconcile } = require('./score/reconcile');
 
 const { applyRecipe } = require('./recipe/applier');
 
+const platforms = require('./extract/platforms');
 const jsonLd = require('./extract/jsonLd');
 const microdata = require('./extract/microdata');
 const metaTags = require('./extract/metaTags');
@@ -21,8 +22,12 @@ const domHeuristics = require('./extract/domHeuristics');
  * Ordine di esecuzione. In discovery girano tutti: non e' una cascata con
  * uscita anticipata, perche' il valore sta proprio nel confronto fra sorgenti
  * indipendenti - e' quello che alza la confidenza.
+ *
+ * L'adapter di piattaforma viene per primo perche' ha il peso piu' alto fra le
+ * sorgenti non apprese: quando riconosce Shopify o WooCommerce legge il
+ * prodotto dall'oggetto che la piattaforma stessa espone, varianti comprese.
  */
-const EXTRACTORS = [jsonLd, appState, microdata, metaTags, domHeuristics];
+const EXTRACTORS = [platforms, jsonLd, appState, microdata, metaTags, domHeuristics];
 
 /**
  * @param {string|import('./document').ScrapeDocument} input - HTML o Document

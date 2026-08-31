@@ -22,46 +22,25 @@ const { describeOffer } = require('../scrape/normalize/offer');
 const { validatePrice, nextTrackingHealth, OUTCOME, REJECT } = require('../scrape/score/validate');
 
 /**
- * Confidenza attribuita a un risultato dello scraper dedicato.
+ * Confidenza del risultato.
  *
- * Finche' la pipeline generica e' in shadow mode gli scraper dedicati restano
- * la sorgente primaria, ma non producono una confidenza. L'accordo con la
- * pipeline - due implementazioni indipendenti che concordano - e' pero'
- * un'evidenza vera, e viene usato come tale.
- */
-const CONFIDENCE = Object.freeze({
-	LEGACY_ONLY: 0.75,      // scraper dedicato, nessuna conferma
-	AGREEMENT: 0.88,        // scraper e pipeline concordano
-	DISAGREEMENT: 0.55,     // discordano: qualcosa non va, soglia di quarantena
-});
-
-// Nota sul valore di AGREEMENT: deve stare SOPRA la soglia di accettazione
-// (0,85) e SOTTO quella che permette di saltare il controllo sulla variazione
-// (0,90). L'accordo fra lo scraper dedicato e la pipeline non e' abbastanza
-// indipendente da giustificare un crollo del 99% senza conferma: i due
-// leggono la stessa pagina e spesso la stessa sorgente, quindi possono
-// agganciare lo stesso elemento sbagliato - il costo di spedizione al posto
-// del prezzo. Per superare quel controllo serve una confidenza che venga da
-// piu' sorgenti strutturate concordi, oppure un secondo fetch di conferma.
-
-/**
- * @param {object} scraped - uscita di scrapeProduct (con il blocco shadow)
+ * Dalla fase 5 la pipeline generica e' il percorso primario e produce una
+ * confidenza propria, calcolata sull'accordo fra sorgenti indipendenti. Non
+ * serve piu' dedurla dall'accordo con gli scraper dedicati, che non esistono
+ * piu'.
+ *
+ * @param {object} scraped - uscita di scrapeProduct
  * @returns {{confidence: number, source: string}}
  */
 function confidenceOf(scraped) {
-	const shadow = scraped?.shadow;
-	if (!shadow) return { confidence: CONFIDENCE.LEGACY_ONLY, source: 'legacy' };
-
-	switch (shadow.agreement) {
-		case 'match':
-			return { confidence: CONFIDENCE.AGREEMENT, source: 'legacy+pipeline' };
-		case 'mismatch':
-			return { confidence: CONFIDENCE.DISAGREEMENT, source: 'legacy!=pipeline' };
-		case 'legacy_only':
-			return { confidence: CONFIDENCE.LEGACY_ONLY, source: 'legacy' };
-		default:
-			return { confidence: CONFIDENCE.LEGACY_ONLY, source: 'legacy' };
+	if (typeof scraped?.confidence === 'number') {
+		return {
+			confidence: scraped.confidence,
+			source: scraped.fields?.price?.source ?? 'pipeline',
+		};
 	}
+	// Un risultato senza confidenza non e' interpretabile: si tratta come tale.
+	return { confidence: 0, source: 'sconosciuta' };
 }
 
 /**
@@ -94,7 +73,7 @@ async function checkProduct({ product, scrape, repo, now = () => new Date() }) {
 
 	const { confidence, source } = confidenceOf(scraped);
 
-	const price = scrapeError ? null : parsePrice(scraped?.price);
+	const price = scrapeError ? null : parsePrice(scraped?.priceValue ?? scraped?.price);
 	const currency = scrapeError
 		? null
 		: normalizeCurrency(scraped?.currency ?? scraped?.price, { url: product.url, fallback: null });
@@ -219,4 +198,4 @@ async function checkProduct({ product, scrape, repo, now = () => new Date() }) {
 	};
 }
 
-module.exports = { checkProduct, confidenceOf, CONFIDENCE };
+module.exports = { checkProduct, confidenceOf };

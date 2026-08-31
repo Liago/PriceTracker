@@ -7,9 +7,6 @@ import schemaModule from '../../scrape/recipe/schema.js';
 import applierModule from '../../scrape/recipe/applier.js';
 import documentModule from '../../scrape/document.js';
 import pipelineModule from '../../scrape/pipeline.js';
-import { FakePage } from '../helpers/fakePage.js';
-import MediaWorldScraper from '../../services/scrapers/MediaWorldScraper.js';
-import BackMarketScraper from '../../services/scrapers/BackMarketScraper.js';
 
 const { SEEDED_RECIPES, seedFor } = seedsModule;
 const { validateRecipe } = schemaModule;
@@ -56,54 +53,50 @@ describe('ricette seminate - validita\'', () => {
 	});
 });
 
-describe('ricette seminate - producono lo stesso risultato degli scraper dedicati', () => {
-	/** Esegue lo scraper dedicato e la ricetta seminata sulla stessa fixture. */
-	async function confronta(store, file, url, ScraperClass, domain) {
+describe('ricette seminate - producono lo stesso risultato della scoperta completa', () => {
+	/**
+	 * Confronta la ricetta seminata con la scoperta completa sulla stessa
+	 * pagina. Dopo la fase 5 gli scraper dedicati non esistono piu': il metro
+	 * di paragone e' la pipeline generica, che e' cio' che la ricetta deve
+	 * poter sostituire senza perdere nulla.
+	 */
+	function confronta(store, file, url, domain) {
 		const html = fixture(store, file);
-
-		const page = new FakePage(html, { url });
-		let legacy;
-		try {
-			legacy = await new ScraperClass(page).scrape(url);
-		} finally {
-			page.close();
-		}
-
-		const recipe = seedFor(domain);
-		const candidates = applyRecipe(recipe, createDocument(html, { url }));
+		const discovery = runPipeline(html, { url });
+		const candidates = applyRecipe(seedFor(domain), createDocument(html, { url }));
 
 		return {
-			legacyPrice: legacy.price,
+			legacyPrice: discovery.result.price,
 			recipePrice: candidates.find((c) => c.field === 'price')?.value,
 			recipeCurrency: candidates.find((c) => c.field === 'currency')?.value,
 			recipeAvailability: candidates.find((c) => c.field === 'availability')?.value,
 		};
 	}
 
-	it('MediaWorld: la ricetta seminata da\' lo stesso prezzo della classe', async () => {
-		const out = await confronta(
+	it('MediaWorld: la ricetta seminata da\' lo stesso prezzo della scoperta', () => {
+		const out = confronta(
 			'mediaworld', 'product-in-stock.html',
-			'https://www.mediaworld.it/p', MediaWorldScraper, 'mediaworld.it');
+			'https://www.mediaworld.it/p', 'mediaworld.it');
 
 		expect(out.recipePrice).toBe(729);
-		expect(Number(out.legacyPrice)).toBe(out.recipePrice);
+		expect(out.legacyPrice).toBe(out.recipePrice);
 		expect(out.recipeCurrency).toBe('EUR');
 		expect(out.recipeAvailability).toBe('in_stock');
 	});
 
-	it('MediaWorld esaurito: stesso prezzo e disponibilita\' corretta', async () => {
-		const out = await confronta(
+	it('MediaWorld esaurito: stesso prezzo e disponibilita\' corretta', () => {
+		const out = confronta(
 			'mediaworld', 'product-out-of-stock.html',
-			'https://www.mediaworld.it/p', MediaWorldScraper, 'mediaworld.it');
+			'https://www.mediaworld.it/p', 'mediaworld.it');
 
 		expect(out.recipePrice).toBe(299.99);
 		expect(out.recipeAvailability).toBe('out_of_stock');
 	});
 
-	it('BackMarket: la ricetta seminata da\' lo stesso prezzo della classe', async () => {
-		const out = await confronta(
+	it('BackMarket: la ricetta seminata da\' lo stesso prezzo della scoperta', () => {
+		const out = confronta(
 			'backmarket', 'product-in-stock.html',
-			'https://www.backmarket.it/p', BackMarketScraper, 'backmarket.it');
+			'https://www.backmarket.it/p', 'backmarket.it');
 
 		expect(out.recipePrice).toBe(379);
 		expect(out.recipeCurrency).toBe('EUR');

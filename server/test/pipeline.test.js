@@ -25,12 +25,19 @@ describe('pipeline - shop con dati strutturati', () => {
 	});
 
 	it('preferisce una sorgente strutturata al DOM', () => {
-		expect(['jsonld', 'appstate', 'microdata']).toContain(out.fields.price.source);
+		expect(['platform', 'jsonld', 'appstate', 'microdata']).toContain(out.fields.price.source);
+	});
+
+	it('l\'adapter di piattaforma vince sulle altre sorgenti strutturate', () => {
+		// La fixture e' una pagina Shopify: l'adapter legge il prodotto
+		// dall'oggetto che la piattaforma stessa espone, varianti comprese, e
+		// per questo pesa piu' del JSON-LD.
+		expect(out.fields.price.source).toBe('platform');
 	});
 
 	it('registra quali estrattori hanno girato e quanti candidati hanno prodotto', () => {
 		const names = out.extractorsRan.map((e) => e.name);
-		expect(names).toEqual(['jsonld', 'appstate', 'microdata', 'meta', 'dom']);
+		expect(names).toEqual(['platform', 'jsonld', 'appstate', 'microdata', 'meta', 'dom']);
 		expect(out.extractorsRan.every((e) => e.error === null)).toBe(true);
 		expect(out.extractorsRan.find((e) => e.name === 'jsonld').candidates).toBeGreaterThan(0);
 	});
@@ -107,7 +114,7 @@ describe('pipeline - robustezza', () => {
 		// Si verifica il contratto: ogni estrattore riporta il proprio errore
 		// e la pipeline prosegue.
 		const out = run('shopify-like.html');
-		expect(out.extractorsRan).toHaveLength(5);
+		expect(out.extractorsRan).toHaveLength(6);
 		expect(out.result.price).toBe(149);
 	});
 

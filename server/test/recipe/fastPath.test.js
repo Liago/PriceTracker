@@ -48,7 +48,7 @@ describe('fast path', () => {
 		const veloce = runPipeline(html, { url, recipe: recipeFor('shopify-like.html', url) });
 
 		expect(veloce.extractorsRan).toHaveLength(1);
-		expect(completa.extractorsRan).toHaveLength(5);
+		expect(completa.extractorsRan).toHaveLength(6);
 	});
 });
 

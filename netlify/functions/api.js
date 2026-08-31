@@ -4,7 +4,7 @@ const dotenv = require('dotenv');
 const serverless = require('serverless-http');
 const { scrapeProduct } = require('../../server/services/scraper');
 const { checkProductPrices } = require('../../server/services/priceTracker');
-const { validateProductUrl } = require('../../server/utils/validation');
+const { checkUrl } = require('../../server/scrape/policy/urlPolicy');
 const { normalizeScrapeResult } = require('../../server/scrape/normalizeResult');
 
 dotenv.config();
@@ -95,14 +95,16 @@ router.post('/scrape', scrapeLimiter, async (req, res) => {
 	}
 
 	try {
-		const validUrl = await validateProductUrl(url);
-		const data = await scrapeProduct(validUrl);
-		res.json(normalizeScrapeResult(data, validUrl));
-	} catch (error) {
-		if (error.message.includes('URL') || error.message.includes('Domain')) {
-			console.warn('[Validation Error] Request rejected:', error.message);
-			return res.status(400).json({ error: error.message });
+		// Nessuna whitelist: si verifica che l'URL sia sicuro da visitare,
+		// non che il dominio sia in un elenco.
+		const policy = await checkUrl(url);
+		if (!policy.allowed) {
+			return res.status(400).json({ error: `URL non ammesso: ${policy.reason}`, reason: policy.reason });
 		}
+
+		const data = await scrapeProduct(policy.url);
+		res.json(normalizeScrapeResult(data, policy.url));
+	} catch (error) {
 		console.error('Scraping error:', error);
 		res.status(500).json({ error: 'Failed to scrape product' });
 	}
