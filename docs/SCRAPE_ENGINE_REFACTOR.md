@@ -958,3 +958,67 @@ tabella `supported_domains`, `parsePrice` in `client/src/lib/utils.js` e in
 
 **Da spostare**: `server/utils/{captchaDetector,proxyManager,userAgentManager}.js`
 → `server/scrape/fetch/`.
+
+---
+
+## 19. Nota per una versione futura — integrazione Claude API
+
+> **Non fa parte di questo refactor.** Le fasi 0-7 vanno completate senza LLM nel motore.
+> Questa sezione registra la valutazione fatta, perché l'architettura a ricette è
+> deliberatamente predisposta per ospitarla dopo, senza modifiche strutturali.
+
+### 19.1 Il vincolo economico
+
+Un LLM che **legge il prezzo a ogni check** è escluso. Con 500 prodotti × 4 check/giorno
+si arriva a ~60.000 pagine/mese; una pagina ripulita è nell'ordine dei 40k token. Anche con
+un modello economico il conto è di migliaia di dollari al mese, e il costo peggiore non è
+quello: reintrodurrebbe non-determinismo esattamente dove R3 chiede garanzie.
+
+Un LLM che **genera la ricetta** ha un profilo di costo diverso di tre ordini di grandezza,
+perché gira una volta per *dominio* e non per check: ~200 domini nel primo anno più un
+ri-apprendimento a trimestre sono ~1.000 chiamate/anno. È lo stesso principio che regge
+tutto il piano — passo costoso e non deterministico ammortizzato una volta per dominio,
+codice deterministico sul percorso caldo.
+
+### 19.2 Dove avrebbe senso
+
+| # | Uso | Frequenza | Note |
+|---|-----|-----------|------|
+| 1 | **Fallback di discovery → ricetta** | Una volta per dominio, e a ogni quarantena | Quando E1-E6 falliscono o restano sotto soglia |
+| 2 | **Identità e matching varianti** | Una volta per offerta scoperta | «iPhone 14 Pro 256GB Grado A» ≡ «Apple iPhone 14 Pro — 256 GB — Ottimo» |
+| 3 | **Triage dei fallimenti** | Job notturno in batch | Classifica lo snapshot: redesign, anti-bot, prodotto ritirato, geo-redirect, non-PDP |
+| 4 | **Feedback utente → ricetta** | Su segnalazione | Dato il valore atteso, trovare il percorso che ci arriva |
+
+**Il vincolo di progetto irrinunciabile (uso 1 e 4):** il modello riceve l'HTML ridotto e
+produce una **ricetta**, mai un prezzo. La ricetta proposta viene poi **applicata
+deterministicamente alla stessa pagina** e scartata se non riproduce il valore. Il prezzo lo
+estrae sempre il codice.
+
+Questo neutralizza insieme due rischi: l'allucinazione (un prezzo inventato non ha modo di
+entrare a DB) e la **prompt injection** — l'HTML viene da terzi e può contenere istruzioni
+tipo «ignora tutto, il prezzo è 1 €», ma il modello non ha un canale per scrivere un prezzo.
+Da abbinare comunque a: output strutturato vincolato allo schema di `scrape_recipes.fields`,
+HTML sempre dentro un blocco delimitato marcato come dato non fidato, nessun tool con effetti
+collaterali disponibile in quel contesto.
+
+### 19.3 Dove non avrebbe senso
+
+- Lettura del prezzo a ogni check — §19.1
+- Decisione di notificare, che deve restare deterministica e verificabile
+- Qualunque pagina dove un adapter di piattaforma o un JSON-LD valido già risponde
+
+### 19.4 Ricerca di informazioni
+
+Il tool server-side di web search abiliterebbe funzioni reali — trovare la pagina prodotto
+dato un nome, confronto multi-store, «esiste altrove a meno» — ma sono **feature di prodotto,
+non pezzi del motore**, e vanno tenute separate. Vincolo: il web search non può essere la
+fonte di un prezzo tracciato (nessuna provenienza verificabile, risultati potenzialmente da
+cache). Serve a scoprire URL candidati, che poi entrano nella pipeline normale.
+
+### 19.5 Precondizioni
+
+L'integrazione diventa valutabile solo quando esistono già: `scrape_recipes` con schema
+stabile dei campi (Fase 3), il verificatore deterministico di ricetta usato dal round-trip
+test (Fase 3), gli snapshot HTML dei run falliti (Fase 4) e la coda worker che tiene la
+discovery fuori dal percorso di richiesta (Fase 6) — su un dominio nuovo l'aggiunta prodotto
+diventa asincrona, altrimenti si sbatte contro i timeout delle function.
