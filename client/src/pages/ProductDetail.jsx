@@ -3,10 +3,12 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, ExternalLink, Save, Trash2, RefreshCw, List, Maximize2, X, Calendar, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { toast } from 'sonner'
+import TrackingHealthBadge from '../components/TrackingHealthBadge'
+import PriceFeedbackButton from '../components/PriceFeedbackButton'
 import { useAuth } from '../context/AuthContext'
 import ConfirmationModal from '../components/ConfirmationModal'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
-import { scrapeProduct } from '../lib/api'
+import { refreshProduct } from '../lib/api'
 
 export default function ProductDetail() {
   const { id } = useParams()
@@ -73,60 +75,26 @@ export default function ProductDetail() {
   }
 
   const handleRefresh = async () => {
-    if (!product?.url) return
+    if (!product?.id) return
     setRefreshing(true)
-    
+
     try {
-      // 1. Scrape fresh data. The server returns the price already parsed;
-      // null means the page was read but no trustworthy price was found.
-      const data = await scrapeProduct(product.url)
-      const newPrice = data.priceValue ?? null
-      const oldPrice = product.current_price
-      const priceChanged = newPrice !== null && Math.abs(newPrice - oldPrice) > 0.01
+      // Il refresh passa dalla stessa validazione del controllo automatico:
+      // un prezzo non attendibile non sovrascrive quello buono.
+      const result = await refreshProduct(product.id)
 
-      // 2. Update product in DB. When the price is unreadable we refresh
-      // everything else and leave current_price untouched, rather than
-      // overwriting a good price with a guess.
-      const { error: updateError } = await supabase
-        .from('products')
-        .update({
-          ...(newPrice !== null ? { current_price: newPrice } : {}),
-          store: data.store,
-          details: { ...product.details, ...data.details, availability: data.availability },
-          image: data.image, // Update image if changed
-          last_checked_at: new Date().toISOString()
-        })
-        .eq('id', id)
-
-      if (updateError) throw updateError
-
-      if (newPrice === null) {
-        toast.warning('Refreshed, but no price could be read on the page this time.')
-        fetchProductAndHistory()
-        return
-      }
-
-      // 3. If price changed, add to history
-      if (priceChanged) {
-        const { error: historyError } = await supabase
-          .from('price_history')
-          .insert({
-            product_id: id,
-            price: newPrice
-          })
-        
-        if (historyError) throw historyError
-        toast.success(`Price updated! ${oldPrice} -> ${newPrice}`)
+      if (!result.accepted) {
+        toast.warning('Aggiornato, ma il prezzo letto non è attendibile: resta quello precedente.')
+      } else if (result.priceChanged) {
+        toast.success(`Prezzo aggiornato: ${result.previousPrice} → ${result.price}`)
       } else {
-        toast.success('Product data refreshed!')
+        toast.success('Prodotto aggiornato, prezzo invariato.')
       }
 
-      // 4. Reload data
       fetchProductAndHistory()
-
     } catch (error) {
-      console.error('Error refreshing product:', error)
-      toast.error('Failed to refresh product data')
+      console.error('Errore durante l\'aggiornamento:', error)
+      toast.error(error.message || 'Aggiornamento fallito')
     } finally {
       setRefreshing(false)
     }
@@ -282,6 +250,14 @@ export default function ProductDetail() {
                       Last check: {new Date(product.last_checked_at).toLocaleString()}
                     </div>
                   )}
+                </div>
+
+                {/* Stato del tracking: distingue "prezzo fermo" da "non
+                    riesco piu' a leggere questa pagina". */}
+                <TrackingHealthBadge health={product.tracking_health} className="mt-4" />
+
+                <div className="mt-3">
+                  <PriceFeedbackButton productId={product.id} currentPrice={product.current_price} />
                 </div>
               </div>
 

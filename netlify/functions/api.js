@@ -1,129 +1,72 @@
+/**
+ * API su Netlify Functions.
+ *
+ * Le route sono definite una volta sola in server/api/routes.js e montate qui
+ * e nel server Express: finora esistevano due copie della stessa logica, con
+ * comportamenti diversi.
+ */
+
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const serverless = require('serverless-http');
-const { scrapeProduct } = require('../../server/services/scraper');
+const rateLimit = require('express-rate-limit');
+const { createClient } = require('@supabase/supabase-js');
+const { registerRoutes } = require('../../server/api/routes');
 const { checkProductPrices } = require('../../server/services/priceTracker');
-const { checkUrl } = require('../../server/scrape/policy/urlPolicy');
-const { normalizeScrapeResult } = require('../../server/scrape/normalizeResult');
 
 dotenv.config();
 
 const app = express();
-const router = express.Router();
-
 app.use(cors());
 app.use(express.json());
 
-app.get('/', (req, res) => {
-	res.send('Price Tracker API (Netlify Functions)');
-});
+app.get('/', (req, res) => res.send('Price Tracker API'));
 
-// Rate Limiting
-const rateLimit = require('express-rate-limit');
-
-// General API limiter
 const apiLimiter = rateLimit({
-	windowMs: 15 * 60 * 1000, // 15 minutes
-	max: 100, // Limit each IP to 100 requests per windowMs
+	windowMs: 15 * 60 * 1000,
+	max: 100,
 	standardHeaders: true,
 	legacyHeaders: false,
 });
 
-// Scraper limiter (stricter)
 const scrapeLimiter = rateLimit({
-	windowMs: 60 * 1000, // 1 minute
-	max: 10, // Limit each IP to 10 requests per minute
+	windowMs: 60 * 1000,
+	max: 10,
 	standardHeaders: true,
 	legacyHeaders: false,
-	message: { error: 'Too many scraping requests, please try again later.' }
+	message: { error: 'Troppe richieste di analisi, riprova fra poco.' },
 });
 
-app.use('/api', apiLimiter);
-app.use('/.netlify/functions/api', apiLimiter);
-
-// Scrape endpoint
-router.post('/scrape', scrapeLimiter, async (req, res) => {
-	console.log('[Debug] Request Headers:', JSON.stringify(req.headers));
-	console.log('[Debug] Request Body Type:', typeof req.body);
-	console.log('[Debug] Request Body:', JSON.stringify(req.body));
-
-	let { url } = req.body;
-
-	// Handle Buffer body (Netlify/Serverless specific)
-	if (Buffer.isBuffer(req.body)) {
-		try {
-			const text = req.body.toString('utf-8');
-			console.log('[Debug] Converted raw Buffer to string:', text);
-			const parsed = JSON.parse(text);
-			url = parsed.url;
-		} catch (e) {
-			console.error('[Debug] Raw Buffer conversion failed:', e);
-		}
-	} else if (req.body && req.body.type === 'Buffer' && Array.isArray(req.body.data)) {
-		// Handle JSON-serialized Buffer (e.g. from JSON.stringify)
-		try {
-			const buffer = Buffer.from(req.body.data);
-			const text = buffer.toString('utf-8');
-			console.log('[Debug] Converted serialized Buffer to string:', text);
-			const parsed = JSON.parse(text);
-			url = parsed.url;
-		} catch (e) {
-			console.error('[Debug] Serialized Buffer conversion failed:', e);
-		}
+let adminClient = null;
+function getClient() {
+	if (!adminClient) {
+		adminClient = createClient(
+			process.env.SUPABASE_URL,
+			process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+		);
 	}
+	return adminClient;
+}
 
-	// Fallback: If express.json() didn't work and body is a string
-	if (!url && typeof req.body === 'string') {
-		try {
-			const parsed = JSON.parse(req.body);
-			url = parsed.url;
-			console.log('[Debug] Manually parsed body:', parsed);
-		} catch (e) {
-			console.error('[Debug] Manual JSON parse failed:', e);
-		}
-	}
+const router = express.Router();
+router.use(apiLimiter);
+router.post('/scrape', scrapeLimiter);
+registerRoutes({ getClient })(router);
 
-	if (!url) {
-		return res.status(400).json({
-			error: 'URL is required',
-			debug: {
-				bodyType: typeof req.body,
-				bodyReceived: req.body
-			}
-		});
-	}
-
-	try {
-		// Nessuna whitelist: si verifica che l'URL sia sicuro da visitare,
-		// non che il dominio sia in un elenco.
-		const policy = await checkUrl(url);
-		if (!policy.allowed) {
-			return res.status(400).json({ error: `URL non ammesso: ${policy.reason}`, reason: policy.reason });
-		}
-
-		const data = await scrapeProduct(policy.url);
-		res.json(normalizeScrapeResult(data, policy.url));
-	} catch (error) {
-		console.error('Scraping error:', error);
-		res.status(500).json({ error: 'Failed to scrape product' });
-	}
-});
-
-// Manual check endpoint
 router.post('/check-prices', async (req, res) => {
 	try {
 		await checkProductPrices();
-		res.json({ message: 'Price check completed' });
+		res.json({ message: 'Controllo completato' });
 	} catch (error) {
-		console.error('Price check error:', error);
-		res.status(500).json({ error: 'Price check failed' });
+		console.error('[API] Controllo prezzi fallito:', error.message);
+		res.status(500).json({ error: 'Controllo prezzi fallito' });
 	}
 });
 
-// Mount router at /api (for local/rewrite) and /.netlify/functions/api (for direct access)
+// Montato su entrambi i percorsi: la riscrittura di Netlify usa /api, ma la
+// function e' raggiungibile anche direttamente.
 app.use('/api', router);
 app.use('/.netlify/functions/api', router);
 
-// Export the handler
 module.exports.handler = serverless(app);

@@ -20,6 +20,7 @@ const { normalizeCurrency } = require('../scrape/normalize/currency');
 const { normalizeAvailability, AVAILABILITY } = require('../scrape/normalize/availability');
 const { describeOffer } = require('../scrape/normalize/offer');
 const { validatePrice, nextTrackingHealth, OUTCOME, REJECT } = require('../scrape/score/validate');
+const { recordCheck } = require('../scrape/telemetry');
 
 /**
  * Confidenza del risultato.
@@ -177,6 +178,16 @@ async function checkProduct({ product, scrape, repo, now = () => new Date() }) {
 			notified = true;
 		}
 	}
+
+	recordCheck({
+		domain: product.domain || null,
+		accepted: validation.accepted,
+		confidence,
+		source,
+		usedFastPath: scraped?.usedFastPath,
+		durationMs: Date.now() - startedAt.getTime(),
+		reasons: validation.reasons,
+	});
 
 	return {
 		...outcomeBase,

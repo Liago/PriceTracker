@@ -5,6 +5,7 @@ import { Plus, Trash2, ExternalLink, LayoutGrid, List, Search, Filter, ArrowUpDo
 import ConfirmationModal from '../components/ConfirmationModal'
 import { scrapeProduct } from '../lib/api'
 import { supabase } from '../lib/supabase'
+import TrackingHealthBadge from '../components/TrackingHealthBadge'
 
 export default function Dashboard() {
   /* New Dashboard without Header components */
@@ -190,10 +191,13 @@ export default function Dashboard() {
                     )}
                   </div>
                   <div className={`${viewMode === 'list' ? 'flex-1 min-w-0' : 'p-4'}`}>
-                    <div className="mb-2">
+                    <div className="mb-2 flex items-center gap-2">
                       <span className="text-xs font-medium px-2 py-1 bg-gray-700 rounded text-gray-300 uppercase tracking-wider">
                         {product.store || 'Unknown Store'}
                       </span>
+                      {product.tracking_health && product.tracking_health !== 'healthy' && (
+                        <TrackingHealthBadge health={product.tracking_health} compact />
+                      )}
                     </div>
                     <h3 className={`font-semibold text-white mb-2 line-clamp-2 ${viewMode === 'list' ? 'text-lg' : ''}`} title={product.name}>{product.name || 'Untitled Product'}</h3>
                     <div className={`${viewMode === 'list' ? 'flex gap-6' : 'space-y-3'}`}>

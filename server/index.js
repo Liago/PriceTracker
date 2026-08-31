@@ -54,54 +54,49 @@ if (process.env.NODE_ENV !== 'production' && !process.env.NETLIFY) {
 	console.log('[Server] Scheduler locale disattivato: in produzione decidono dispatcher e worker');
 }
 
-// Manual trigger endpoint (optional, useful for testing)
-app.post('/api/check-prices', async (req, res) => {
-	console.log('[Server] Manual price check triggered');
-	checkProductPrices();
-	res.json({ message: 'Price check started in background' });
-});
+const { createClient } = require('@supabase/supabase-js');
+const { registerRoutes } = require('./api/routes');
 
 // Rate Limiting
 const rateLimit = require('express-rate-limit');
 
 const apiLimiter = rateLimit({
-	windowMs: 15 * 60 * 1000, // 15 minutes
+	windowMs: 15 * 60 * 1000,
 	max: 100,
 	standardHeaders: true,
 	legacyHeaders: false,
 });
 
 const scrapeLimiter = rateLimit({
-	windowMs: 60 * 1000, // 1 minute
+	windowMs: 60 * 1000,
 	max: 10,
-	message: { error: 'Too many scraping requests, please try again later.' }
+	message: { error: 'Troppe richieste di analisi, riprova fra poco.' },
 });
 
-app.use('/api', apiLimiter);
-
-const { scrapeProduct } = require('./services/scraper');
-
-const { checkUrl } = require('./scrape/policy/urlPolicy');
-const { normalizeScrapeResult } = require('./scrape/normalizeResult');
-
-app.post('/api/scrape', scrapeLimiter, async (req, res) => {
-	const { url } = req.body;
-
-	try {
-		// Nessuna whitelist: si verifica che l'URL sia sicuro da visitare,
-		// non che il dominio sia in un elenco.
-		const policy = await checkUrl(url);
-		if (!policy.allowed) {
-			return res.status(400).json({ error: `URL non ammesso: ${policy.reason}`, reason: policy.reason });
-		}
-
-		const data = await scrapeProduct(policy.url);
-		res.json(normalizeScrapeResult(data, policy.url));
-	} catch (error) {
-		console.error('Scraping error:', error);
-		res.status(500).json({ error: 'Failed to scrape product' });
+let adminClient = null;
+function getClient() {
+	if (!adminClient) {
+		adminClient = createClient(
+			process.env.SUPABASE_URL,
+			process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+		);
 	}
+	return adminClient;
+}
+
+const router = express.Router();
+router.use(apiLimiter);
+router.post('/scrape', scrapeLimiter);
+registerRoutes({ getClient })(router);
+
+// Innesco manuale del controllo, utile in sviluppo.
+router.post('/check-prices', async (req, res) => {
+	console.log('[Server] Controllo prezzi avviato a mano');
+	checkProductPrices();
+	res.json({ message: 'Controllo avviato in background' });
 });
+
+app.use('/api', router);
 
 app.listen(PORT, () => {
 	console.log(`Server is running on port ${PORT}`);

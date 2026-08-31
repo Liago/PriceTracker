@@ -18,11 +18,18 @@
 | **4 — Offerte e osservazioni** | ✅ completata | `product_offers`, `price_observations`, vista `price_history_v`, backfill verificato su Postgres 16; sei controlli di plausibilita'; il price tracker scrive un'osservazione a ogni controllo e non tocca `current_price` su un prezzo non accettato. Chiusi D6, D7, D8. 455 test |
 | **5 — Switch e apertura** | ✅ completata | La pipeline e' il percorso primario; **le 13 classi e la whitelist sono eliminate**; adapter di piattaforma (Shopify, WooCommerce, PrestaShop); SSRF guard, robots e rate limiting per dominio. Chiusi D1, D2, D3, D15 (parziale). 486 test |
 | **6 — Coda e worker** | ✅ completata | `scrape_jobs` con claim atomico verificato su Postgres (due worker concorrenti, lotti disgiunti, zero sovrapposizioni); dispatcher e worker come function schedulate; scheduling adattivo; scheduler locale solo in sviluppo. Chiusi D10, D11. 510 test |
-| 7 — Interfaccia e osservabilita' | ⏳ da fare | |
+| **7 — Interfaccia e osservabilita'** | ✅ completata | Endpoint condivisi fra Express e Netlify; il client non scrive piu' a database (D15); badge di salute, segnalazione prezzo errato, `scrape_field_feedback`; telemetria con allarmi. 521 test |
 
-**Difetti chiusi finora:** D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11, D13, D14 (13 su 16).
-**Restano:** D12 (browser sempre acceso) richiede il tier 0 HTTP, non ancora
-implementato; D15 (doppia scrittura dal client) e D16 (copertura test) in fase 7.
+**Difetti chiusi:** D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11, D13, D14, D15, D16 (15 su 16).
+**Resta aperto:** D12 (browser sempre acceso). Il motore lavora sull'HTML e non
+sul `page` di Puppeteer, quindi il tier 0 - scaricare la pagina senza browser -
+e' abilitato dall'architettura ma non ancora implementato: e' il prossimo
+guadagno di costo disponibile, stimato nel 70% dei check.
+
+**Da fare in staging su Netlify:** l'intero percorso di rete non e' esercitabile
+in sviluppo. Vanno verificati su traffico reale: resa delle ricette seminate,
+tasso di accettazione, comportamento anti-bot, tenuta dei budget di tempo dei
+worker.
 **Nota:** la verifica e' fatta su fixture e su Postgres locale. Il percorso di
 scrape reale — rete, browser, anti-bot — non e' esercitabile in ambiente di
 sviluppo e va provato in staging prima del rilascio.
