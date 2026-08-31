@@ -84,6 +84,7 @@ app.use('/api', apiLimiter);
 const { scrapeProduct } = require('./services/scraper');
 
 const { validateProductUrl } = require('./utils/validation');
+const { normalizeScrapeResult } = require('./scrape/normalizeResult');
 
 app.post('/api/scrape', scrapeLimiter, async (req, res) => {
 	const { url } = req.body;
@@ -91,7 +92,7 @@ app.post('/api/scrape', scrapeLimiter, async (req, res) => {
 	try {
 		const validUrl = await validateProductUrl(url);
 		const data = await scrapeProduct(validUrl);
-		res.json(data);
+		res.json(normalizeScrapeResult(data, validUrl));
 	} catch (error) {
 		if (error.message.includes('URL') || error.message.includes('Domain')) {
 			return res.status(400).json({ error: error.message });

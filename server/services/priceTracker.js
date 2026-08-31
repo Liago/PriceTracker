@@ -14,6 +14,7 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 const { sendPriceDropNotification } = require('./emailService');
 
 const { normalizeUserSettings } = require('./userSettings');
+const { parsePrice } = require('../scrape/normalize/price');
 
 async function getUserSettings(userId) {
 	const { data, error } = await supabaseAdmin
@@ -33,49 +34,6 @@ async function getUserSettings(userId) {
 const { scrapeProduct } = require('./scraper');
 // Import email service
 
-
-function parsePrice(priceStr, currency) {
-	if (!priceStr) return 0;
-	let clean = priceStr.replace(/[^0-9.,]/g, '');
-	if (!clean) return 0;
-
-	const dotCount = (clean.match(/\./g) || []).length;
-	const commaCount = (clean.match(/,/g) || []).length;
-
-	if (dotCount === 0 && commaCount === 0) {
-		return parseFloat(clean) || 0;
-	}
-
-	if (dotCount > 0 && commaCount > 0) {
-		const lastDot = clean.lastIndexOf('.');
-		const lastComma = clean.lastIndexOf(',');
-		if (lastDot > lastComma) {
-			clean = clean.replace(/,/g, '');
-		} else {
-			clean = clean.replace(/\./g, '').replace(',', '.');
-		}
-	} else if (dotCount > 0) {
-		const parts = clean.split('.');
-		const lastPart = parts[parts.length - 1];
-		if (lastPart.length <= 2 && parts.length === 2) {
-			// Keep as is
-		} else if (lastPart.length === 3 && parts.length === 2) {
-			clean = clean.replace(/\./g, '');
-		} else {
-			clean = clean.replace(/\./g, '');
-		}
-	} else {
-		const parts = clean.split(',');
-		const lastPart = parts[parts.length - 1];
-		if (lastPart.length <= 2 && parts.length === 2) {
-			clean = clean.replace(',', '.');
-		} else {
-			clean = clean.replace(/,/g, '');
-		}
-	}
-
-	return parseFloat(clean) || 0;
-}
 
 async function checkProductPrices() {
 	console.log('[Price Tracker] Starting price check...');
@@ -129,10 +87,13 @@ async function checkProductPrices() {
 
 					// Scrape current price
 					const scrapedData = await scrapeProduct(product.url);
-					const newPrice = parsePrice(scrapedData.price, scrapedData.currency);
+					const newPrice = parsePrice(scrapedData.price);
 
-					if (!newPrice || newPrice === 0) {
-						console.log(`[Price Tracker] Could not extract price for ${product.name}`);
+					// null = prezzo non leggibile. Non si scrive nulla: lasciare
+					// current_price invariato e' corretto, ma la fase 4 rendera'
+					// il fallimento visibile invece che silenzioso (difetto D8).
+					if (newPrice === null) {
+						console.log(`[Price Tracker] Prezzo non leggibile per ${product.name}, nessun aggiornamento`);
 						continue;
 					}
 

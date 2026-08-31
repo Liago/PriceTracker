@@ -5,6 +5,7 @@ const serverless = require('serverless-http');
 const { scrapeProduct } = require('../../server/services/scraper');
 const { checkProductPrices } = require('../../server/services/priceTracker');
 const { validateProductUrl } = require('../../server/utils/validation');
+const { normalizeScrapeResult } = require('../../server/scrape/normalizeResult');
 
 dotenv.config();
 
@@ -96,7 +97,7 @@ router.post('/scrape', scrapeLimiter, async (req, res) => {
 	try {
 		const validUrl = await validateProductUrl(url);
 		const data = await scrapeProduct(validUrl);
-		res.json(data);
+		res.json(normalizeScrapeResult(data, validUrl));
 	} catch (error) {
 		if (error.message.includes('URL') || error.message.includes('Domain')) {
 			console.warn('[Validation Error] Request rejected:', error.message);
