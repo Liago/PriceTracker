@@ -7,6 +7,26 @@
 
 ---
 
+## 0. Stato di avanzamento
+
+| Fase | Stato | Evidenza |
+|------|-------|----------|
+| **0 — Fondamenta** | ✅ completata | Vitest + harness a fixture; migrazioni versionate verificate su Postgres 16 (database vuoto e produzione simulata convergono sullo stesso schema); chiusi D4, D9, D13, D14 |
+| **1 — Normalizzazione unica** | ✅ completata | `server/scrape/normalize/` come sola implementazione di prezzo, valuta e disponibilita'; rimosse le tre copie divergenti di `parsePrice`; chiuso D5. 169 test verdi |
+| 2 — Pipeline in shadow mode | ⏳ da fare | |
+| 3 — Ricette a database | ⏳ da fare | |
+| 4 — Offerte e osservazioni | ⏳ da fare | |
+| 5 — Switch e apertura | ⏳ da fare | |
+| 6 — Coda e worker | ⏳ da fare | |
+| 7 — Interfaccia e osservabilita' | ⏳ da fare | |
+
+**Difetti chiusi finora:** D4, D5, D9, D13, D14 (5 su 16).
+**Nota:** la verifica e' fatta su fixture e su Postgres locale. Il percorso di
+scrape reale — rete, browser, anti-bot — non e' esercitabile in ambiente di
+sviluppo e va provato in staging prima del rilascio.
+
+---
+
 ## 1. Obiettivo
 
 > «Poter leggere qualunque pagina di qualunque shop online, in maniera tale da poter leggere
