@@ -14,15 +14,16 @@
 | **0 — Fondamenta** | ✅ completata | Vitest + harness a fixture; migrazioni versionate verificate su Postgres 16 (database vuoto e produzione simulata convergono sullo stesso schema); chiusi D4, D9, D13, D14 |
 | **1 — Normalizzazione unica** | ✅ completata | `server/scrape/normalize/` come sola implementazione di prezzo, valuta e disponibilita'; rimosse le tre copie divergenti di `parsePrice`; chiuso D5. 169 test verdi |
 | **2 — Pipeline in shadow mode** | ✅ codice completo, misura in produzione da fare | Pipeline generica (JSON-LD, app state, microdata, meta, euristiche DOM) con riconciliazione e confidenza; shadow mode attivo in `services/scraper.js`, non scrive nulla. 304 test. **Il tasso di accordo ≥ 95% va misurato in produzione**, non su fixture |
-| 3 — Ricette a database | ⏳ da fare | |
+| **3 — Ricette a database** | ✅ completata | `scrape_recipes`, `domain_profiles`, `scrape_runs` con vincoli verificati su Postgres 16; learner, applier, store e fast path; 18 ricette seminate dai tredici scraper. **Round-trip verde: 6 fixture su 7 riproducono il prezzo identico**, la settima e' una pagina di categoria e viene rifiutata. 386 test |
 | 4 — Offerte e osservazioni | ⏳ da fare | |
 | 5 — Switch e apertura | ⏳ da fare | |
 | 6 — Coda e worker | ⏳ da fare | |
 | 7 — Interfaccia e osservabilita' | ⏳ da fare | |
 
 **Difetti chiusi finora:** D4, D5, D9, D13, D14 (5 su 16).
-**In corso:** D3 (selettori hardcoded) — la pipeline generica esiste e gira, ma
-sostituira' gli scraper dedicati solo in fase 5.
+**In corso:** D3 (selettori hardcoded) — la pipeline generica e le ricette a
+database esistono e girano; le classi in `services/scrapers/` verranno eliminate
+in fase 5, quando il fast path sara' il percorso primario.
 **Nota:** la verifica e' fatta su fixture e su Postgres locale. Il percorso di
 scrape reale — rete, browser, anti-bot — non e' esercitabile in ambiente di
 sviluppo e va provato in staging prima del rilascio.
