@@ -5,7 +5,6 @@ import { Plus, Trash2, ExternalLink, LayoutGrid, List, Search, Filter, ArrowUpDo
 import ConfirmationModal from '../components/ConfirmationModal'
 import { scrapeProduct } from '../lib/api'
 import { supabase } from '../lib/supabase'
-import { parsePrice } from '../lib/utils'
 
 export default function Dashboard() {
   /* New Dashboard without Header components */

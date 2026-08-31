@@ -7,7 +7,6 @@ import { useAuth } from '../context/AuthContext'
 import ConfirmationModal from '../components/ConfirmationModal'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { scrapeProduct } from '../lib/api'
-import { parsePrice } from '../lib/utils'
 
 export default function ProductDetail() {
   const { id } = useParams()
@@ -78,25 +77,34 @@ export default function ProductDetail() {
     setRefreshing(true)
     
     try {
-      // 1. Scrape fresh data
+      // 1. Scrape fresh data. The server returns the price already parsed;
+      // null means the page was read but no trustworthy price was found.
       const data = await scrapeProduct(product.url)
-      const newPrice = parsePrice(data.price, data.currency)
+      const newPrice = data.priceValue ?? null
       const oldPrice = product.current_price
-      const priceChanged = Math.abs(newPrice - oldPrice) > 0.01
+      const priceChanged = newPrice !== null && Math.abs(newPrice - oldPrice) > 0.01
 
-      // 2. Update product in DB
+      // 2. Update product in DB. When the price is unreadable we refresh
+      // everything else and leave current_price untouched, rather than
+      // overwriting a good price with a guess.
       const { error: updateError } = await supabase
         .from('products')
         .update({
-          current_price: newPrice,
+          ...(newPrice !== null ? { current_price: newPrice } : {}),
           store: data.store,
-          details: { ...product.details, ...data.details, available: data.available },
+          details: { ...product.details, ...data.details, availability: data.availability },
           image: data.image, // Update image if changed
           last_checked_at: new Date().toISOString()
         })
         .eq('id', id)
 
       if (updateError) throw updateError
+
+      if (newPrice === null) {
+        toast.warning('Refreshed, but no price could be read on the page this time.')
+        fetchProductAndHistory()
+        return
+      }
 
       // 3. If price changed, add to history
       if (priceChanged) {

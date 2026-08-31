@@ -5,7 +5,6 @@ import AddProductModal from './AddProductModal'
 import { Toaster } from 'sonner'
 import { scrapeProduct } from '../lib/api'
 import { supabase } from '../lib/supabase'
-import { parsePrice } from '../lib/utils'
 import { useAuth } from '../context/AuthContext' // Needed for user.id in addProduct logic
 
 export default function Layout() {
@@ -16,7 +15,14 @@ export default function Layout() {
   const handleAddProduct = async (url) => {
     // Shared Logic for Adding Product
     const data = await scrapeProduct(url)
-    
+
+    // The server returns the price already parsed. A null means the page was
+    // read but no trustworthy price was found - tracking it would produce a
+    // history that starts from a wrong number, so we stop here instead.
+    if (data.priceValue === null || data.priceValue === undefined) {
+      throw new Error("Couldn't read a price on that page. Check the link points to a product page.")
+    }
+
     // Save to Supabase
     const { error } = await supabase.from('products').insert([
       {
@@ -25,10 +31,10 @@ export default function Layout() {
         name: data.title,
         image: data.image,
         description: data.description,
-        current_price: parsePrice(data.price, data.currency),
+        current_price: data.priceValue,
         currency: data.currency,
         store: data.store,
-        details: data.details
+        details: { ...data.details, availability: data.availability }
       }
     ])
 
