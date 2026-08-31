@@ -18,16 +18,24 @@ class MediaWorldScraper extends BaseScraper {
 				}
 			} catch (e) { }
 
-			// Price
+			// Price: si preferiscono i dati strutturati al DOM, che cambia a ogni
+			// redesign dello store. Il ramo DOM resta come ultima risorsa.
 			let price = null;
-			if (priceEl) {
-				price = priceEl.innerText;
-			} else if (jsonLd.offers) {
+			if (jsonLd.offers) {
 				const offer = Array.isArray(jsonLd.offers) ? jsonLd.offers[0] : jsonLd.offers;
 				if (offer.price) price = offer.price;
-			} else {
+			}
+
+			if (!price) {
 				const metaPrice = document.querySelector('meta[itemprop="price"]');
 				if (metaPrice) price = metaPrice.content;
+			}
+
+			if (!price) {
+				const priceEl = document.querySelector('[data-test="product-price"]')
+					|| document.querySelector('[itemprop="price"]')
+					|| document.querySelector('[class*="product-price"]');
+				if (priceEl) price = priceEl.textContent.trim();
 			}
 
 			// Availability
