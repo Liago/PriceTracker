@@ -13,9 +13,7 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 // Import email service
 const { sendPriceDropNotification } = require('./emailService');
 
-// Default settings (fallback)
-const DEFAULT_SCRAPE_DELAY = 2000;
-const DEFAULT_MAX_RETRIES = 1;
+const { normalizeUserSettings } = require('./userSettings');
 
 async function getUserSettings(userId) {
 	const { data, error } = await supabaseAdmin
@@ -24,17 +22,11 @@ async function getUserSettings(userId) {
 		.eq('user_id', userId)
 		.single();
 
-	if (error || !data) {
-		return {
-			scrape_delay: DEFAULT_SCRAPE_DELAY,
-			max_retries: DEFAULT_MAX_RETRIES
-		};
+	if (error) {
+		console.warn(`[Price Tracker] Impossibile leggere le impostazioni di ${userId}, uso i default:`, error.message);
 	}
 
-	return {
-		scrape_delay: data.scrape_delay || DEFAULT_SCRAPE_DELAY,
-		max_retries: data.max_retries || DEFAULT_MAX_RETRIES
-	};
+	return normalizeUserSettings(error ? null : data);
 }
 
 // Import scraping logic
@@ -119,7 +111,7 @@ async function checkProductPrices() {
 		for (const [userId, userProductList] of Object.entries(userProducts)) {
 			// Fetch user settings
 			const userSettings = await getUserSettings(userId);
-			const intervalMinutes = userSettings.price_check_interval || 360; // Default 6 hours (360 mins)
+			const intervalMinutes = userSettings.priceCheckIntervalMinutes;
 
 			for (const product of userProductList) {
 				try {
@@ -214,13 +206,13 @@ async function checkProductPrices() {
 					}
 
 					// Delay between requests to avoid rate limiting (use user settings)
-					await new Promise(resolve => setTimeout(resolve, userSettings.scrape_delay));
+					await new Promise(resolve => setTimeout(resolve, userSettings.scrapeDelayMs));
 
 				} catch (error) {
 					console.error(`[Price Tracker] Error checking product ${product.id}:`, error.message);
 
 					// Retry once if user settings allow
-					if (userSettings.max_retries > 0) {
+					if (userSettings.maxRetries > 0) {
 						console.log(`[Price Tracker] Retrying ${product.name}...`);
 						await new Promise(resolve => setTimeout(resolve, 5000));
 						// Could implement retry here, skipping for brevity
