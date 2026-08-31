@@ -1,14 +1,26 @@
 const { createClient } = require('@supabase/supabase-js');
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
-
-// Public client with RLS (for backward compatibility if needed)
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-// Service role client for scheduled operations (bypasses RLS)
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseKey;
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
+/**
+ * Client amministrativo, creato al primo uso e non al require.
+ *
+ * Crearlo a livello di modulo faceva fallire il caricamento di CHIUNQUE
+ * importasse questo file quando le variabili d'ambiente non erano ancora
+ * disponibili - inclusa la function api, che importa priceTracker solo per un
+ * endpoint di comodo. Un modulo non deve rendere impossibile il caricamento di
+ * chi lo importa.
+ */
+let supabaseAdminInstance = null;
+function admin() {
+	if (!supabaseAdminInstance) {
+		const url = process.env.SUPABASE_URL;
+		const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+		if (!url || !key) {
+			throw new Error('SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY sono necessarie per il controllo prezzi');
+		}
+		supabaseAdminInstance = createClient(url, key);
+	}
+	return supabaseAdminInstance;
+}
 
 const { normalizeUserSettings } = require('./userSettings');
 const { checkProduct } = require('./productChecker');
@@ -17,7 +29,7 @@ const { createRecipeStore } = require('../scrape/recipe/store');
 const { learnRecipe } = require('../scrape/recipe/learner');
 
 async function getUserSettings(userId) {
-	const { data, error } = await supabaseAdmin
+	const { data, error } = await admin()
 		.from('user_settings')
 		.select('*')
 		.eq('user_id', userId)
@@ -35,6 +47,7 @@ const { scrapeProduct } = require('./scraper');
 async function checkProductPrices() {
 	console.log('[Price Tracker] Starting price check...');
 
+	const supabaseAdmin = admin();
 	const repo = createTrackingRepository(supabaseAdmin);
 	const recipes = createRecipeStore({ client: supabaseAdmin });
 

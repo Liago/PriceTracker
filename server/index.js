@@ -38,23 +38,21 @@ app.get('/', (req, res) => {
 const cron = require('node-cron');
 const { checkProductPrices } = require('./services/priceTracker');
 
-// Price tracking cron job
-// Price tracking cron job
-// Run every minute to check if any product needs updating based on user settings
-const cronExpression = '* * * * *';
-
-console.log(`[Server] Price tracking cron scheduled: ${cronExpression} (every minute)`);
-
-cron.schedule(cronExpression, () => {
-	console.log('[Server] Running scheduled price check...');
-	checkProductPrices();
-});
-
-// Optional: Run on startup (commented out by default)
-// setTimeout(() => {
-//   console.log('[Server] Running initial price check...');
-//   checkProductPrices();
-// }, 5000);
+// Lo scheduler locale gira SOLO in sviluppo. In produzione il lavoro e'
+// governato dalle funzioni schedulate di Netlify (dispatcher e worker): avere
+// due scheduler con logiche diverse - node-cron ogni minuto qui, una function
+// oraria la' - significava comportamenti diversi fra locale e produzione
+// (difetto D10).
+if (process.env.NODE_ENV !== 'production' && !process.env.NETLIFY) {
+	const cronExpression = process.env.DEV_CRON || '*/5 * * * *';
+	console.log(`[Server] Controllo prezzi in sviluppo: ${cronExpression}`);
+	cron.schedule(cronExpression, () => {
+		console.log('[Server] Controllo prezzi schedulato (sviluppo)');
+		checkProductPrices();
+	});
+} else {
+	console.log('[Server] Scheduler locale disattivato: in produzione decidono dispatcher e worker');
+}
 
 // Manual trigger endpoint (optional, useful for testing)
 app.post('/api/check-prices', async (req, res) => {
