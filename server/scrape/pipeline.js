@@ -9,6 +9,8 @@
 const { createDocument } = require('./document');
 const { reconcile } = require('./score/reconcile');
 
+const { applyRecipe } = require('./recipe/applier');
+
 const jsonLd = require('./extract/jsonLd');
 const microdata = require('./extract/microdata');
 const metaTags = require('./extract/metaTags');
@@ -28,16 +30,77 @@ const EXTRACTORS = [jsonLd, appState, microdata, metaTags, domHeuristics];
  * @param {string} [options.url]
  * @param {number|null} [options.lastKnownPrice] - premia la coerenza storica
  * @param {boolean} [options.antiBotDetected=false]
+ * @param {object|null} [options.recipe] - ricetta attiva per il dominio. Se
+ *   presente si tenta il fast path: si riapplica direttamente la strategia che
+ *   ha funzionato l'ultima volta, invece di rieseguire tutti gli estrattori.
+ * @param {number} [options.fastPathThreshold=0.85] - confidenza sotto la quale
+ *   il fast path non viene considerato sufficiente e si passa alla scoperta
  * @returns {object} risultato con campi, confidenza, candidati e diagnostica
  */
 function runPipeline(input, options = {}) {
-	const { url, lastKnownPrice = null, antiBotDetected = false } = options;
+	const {
+		url,
+		lastKnownPrice = null,
+		antiBotDetected = false,
+		recipe = null,
+		fastPathThreshold = 0.85,
+	} = options;
 
 	const doc = typeof input === 'string' ? createDocument(input, { url }) : input;
 	const startedAt = Date.now();
 
 	const candidates = [];
 	const extractorsRan = [];
+
+	// --- Fast path ---
+	//
+	// Se la ricetta produce un risultato affidabile ci si ferma qui: e' il
+	// motivo per cui il refactor e' sostenibile in produzione. La scoperta
+	// completa costa - cinque estrattori e una riconciliazione - mentre
+	// riapplicare una strategia nota no.
+	if (recipe) {
+		const recipeStart = Date.now();
+		let produced = [];
+		let error = null;
+
+		try {
+			produced = applyRecipe(recipe, doc) || [];
+		} catch (e) {
+			error = e.message;
+		}
+
+		extractorsRan.push({
+			name: 'recipe',
+			candidates: produced.length,
+			durationMs: Date.now() - recipeStart,
+			error,
+		});
+
+		if (produced.length > 0) {
+			const fastResult = reconcile(produced, { antiBotDetected });
+			if (fastResult.confidence >= fastPathThreshold) {
+				return {
+					url: doc.url,
+					canonicalUrl: doc.canonicalUrl(),
+					result: fastResult.result,
+					fields: fastResult.fields,
+					confidence: fastResult.confidence,
+					signals: [...fastResult.signals, 'fast-path'],
+					candidates: produced,
+					extractorsRan,
+					usedFastPath: true,
+					recipeId: recipe.id ?? null,
+					recipeVersion: recipe.version ?? null,
+					durationMs: Date.now() - startedAt,
+				};
+			}
+
+			// Sotto soglia: i candidati della ricetta restano in gioco, ma si
+			// esegue anche la scoperta. Se ne uscira' una strategia migliore,
+			// il learner la registrera' come nuova versione.
+			candidates.push(...produced);
+		}
+	}
 
 	for (const extractor of EXTRACTORS) {
 		const extractorStart = Date.now();
@@ -73,6 +136,9 @@ function runPipeline(input, options = {}) {
 		signals: reconciled.signals,
 		candidates,
 		extractorsRan,
+		usedFastPath: false,
+		recipeId: recipe?.id ?? null,
+		recipeVersion: recipe?.version ?? null,
 		durationMs: Date.now() - startedAt,
 	};
 }
