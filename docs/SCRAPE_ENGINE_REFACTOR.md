@@ -15,12 +15,12 @@
 | **1 — Normalizzazione unica** | ✅ completata | `server/scrape/normalize/` come sola implementazione di prezzo, valuta e disponibilita'; rimosse le tre copie divergenti di `parsePrice`; chiuso D5. 169 test verdi |
 | **2 — Pipeline in shadow mode** | ✅ codice completo, misura in produzione da fare | Pipeline generica (JSON-LD, app state, microdata, meta, euristiche DOM) con riconciliazione e confidenza; shadow mode attivo in `services/scraper.js`, non scrive nulla. 304 test. **Il tasso di accordo ≥ 95% va misurato in produzione**, non su fixture |
 | **3 — Ricette a database** | ✅ completata | `scrape_recipes`, `domain_profiles`, `scrape_runs` con vincoli verificati su Postgres 16; learner, applier, store e fast path; 18 ricette seminate dai tredici scraper. **Round-trip verde: 6 fixture su 7 riproducono il prezzo identico**, la settima e' una pagina di categoria e viene rifiutata. 386 test |
-| 4 — Offerte e osservazioni | ⏳ da fare | |
+| **4 — Offerte e osservazioni** | ✅ completata | `product_offers`, `price_observations`, vista `price_history_v`, backfill verificato su Postgres 16; sei controlli di plausibilita'; il price tracker scrive un'osservazione a ogni controllo e non tocca `current_price` su un prezzo non accettato. Chiusi D6, D7, D8. 455 test |
 | 5 — Switch e apertura | ⏳ da fare | |
 | 6 — Coda e worker | ⏳ da fare | |
 | 7 — Interfaccia e osservabilita' | ⏳ da fare | |
 
-**Difetti chiusi finora:** D4, D5, D9, D13, D14 (5 su 16).
+**Difetti chiusi finora:** D4, D5, D6, D7, D8, D9, D13, D14 (8 su 16).
 **In corso:** D3 (selettori hardcoded) — la pipeline generica e le ricette a
 database esistono e girano; le classi in `services/scrapers/` verranno eliminate
 in fase 5, quando il fast path sara' il percorso primario.
