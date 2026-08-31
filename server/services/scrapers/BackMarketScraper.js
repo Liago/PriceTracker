@@ -154,24 +154,13 @@ class BackMarketScraper extends BaseScraper {
 			data.title = pageData.title;
 		}
 
+		// Il prezzo viene passato grezzo, come fanno tutti gli altri scraper: la
+		// conversione a numero avviene una sola volta, in scrape/normalize/price.
+		// Qui viveva una terza implementazione del parsing (difetto D5) che fra
+		// l'altro restituiva un numero dove gli altri scraper restituiscono una
+		// stringa, rendendo il campo price di tipo incoerente fra store.
 		if (pageData.price) {
-			// Regex to clean price: remove currency symbols, handle "1.234,56" vs "1234.56"
-			// Backmarket IT usually shows "€ 259,00"
-			let priceStr = pageData.price.toString().replace(/[^\d.,]/g, ''); // keep only numbers, dots, commas
-
-			// Check format
-			if (priceStr.includes(',') && priceStr.includes('.')) {
-				// classic IT format 1.234,56 -> remove dot, replace comma with dot
-				priceStr = priceStr.replace(/\./g, '').replace(',', '.');
-			} else if (priceStr.includes(',')) {
-				// 259,00 -> 259.00
-				priceStr = priceStr.replace(',', '.');
-			}
-
-			const match = priceStr.match(/[\d\.]+/);
-			if (match) {
-				data.price = parseFloat(match[0]);
-			}
+			data.price = pageData.price;
 		}
 
 		// Availability logic
