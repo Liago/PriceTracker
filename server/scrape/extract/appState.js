@@ -157,6 +157,12 @@ function findPriceObjects(root, stateName) {
  * @param {import('../document').ScrapeDocument} doc
  * @returns {Array} candidati
  */
+// Come per il JSON-LD: la ricetta registra che su questo dominio il prezzo
+// vive nello stato applicativo, non un percorso per indice - i percorsi
+// cambiano a ogni rilascio dello store, ed e' esattamente il motivo per cui
+// BackMarketScraper si rompe.
+const LOCATOR = Object.freeze({ strategy: 'appstate' });
+
 function extract(doc) {
 	const candidates = [];
 
@@ -173,6 +179,7 @@ function extract(doc) {
 		if (value === null) continue;
 
 		candidates.push(candidate({
+			locator: LOCATOR,
 			field: 'price', value, raw: best.price, source: 'appstate', path: best.path,
 			evidence: `${state.name} -> ${best.price} ${best.currency}`,
 			meta: { hasIdentity: best.hasIdentity, stateName: state.name },
@@ -181,6 +188,7 @@ function extract(doc) {
 		const currency = normalizeCurrency(best.currency, { url: doc.url, fallback: null });
 		if (currency) {
 			candidates.push(candidate({
+				locator: LOCATOR,
 				field: 'currency', value: currency, raw: best.currency,
 				source: 'appstate', path: best.path.replace(/\.[^.]+$/, '.currency'),
 			}));
@@ -188,6 +196,7 @@ function extract(doc) {
 
 		if (best.availability !== null && best.availability !== undefined) {
 			candidates.push(candidate({
+				locator: LOCATOR,
 				field: 'availability', value: normalizeAvailability(best.availability),
 				raw: best.availability, source: 'appstate', path: `${state.name}.availability`,
 			}));
@@ -195,6 +204,7 @@ function extract(doc) {
 
 		if (best.title) {
 			candidates.push(candidate({
+				locator: LOCATOR,
 				field: 'title', value: best.title.trim(), source: 'appstate', path: `${state.name}.name`,
 			}));
 		}

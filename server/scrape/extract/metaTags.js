@@ -38,6 +38,7 @@ function extract(doc) {
 			candidates.push(candidate({
 				field: 'price', value, raw: price.value, source: 'meta',
 				path: `meta[${price.key}]`, evidence: price.value,
+				locator: { strategy: 'meta', key: price.key },
 			}));
 		}
 	}
@@ -47,6 +48,7 @@ function extract(doc) {
 		candidates.push(candidate({
 			field: 'currency', value: normalizeCurrency(currency.value, { url: doc.url, fallback: null }),
 			raw: currency.value, source: 'meta', path: `meta[${currency.key}]`,
+			locator: { strategy: 'meta', key: currency.key },
 		}));
 	}
 
@@ -55,29 +57,31 @@ function extract(doc) {
 		candidates.push(candidate({
 			field: 'availability', value: normalizeAvailability(availability.value),
 			raw: availability.value, source: 'meta', path: `meta[${availability.key}]`,
+			locator: { strategy: 'meta', key: availability.key },
 		}));
 	}
 
 	const title = doc.meta('og:title') || doc.meta('twitter:title');
 	if (title) {
-		candidates.push(candidate({ field: 'title', value: title.trim(), source: 'meta', path: 'meta[og:title]' }));
+		candidates.push(candidate({ field: 'title', value: title.trim(), source: 'meta', path: 'meta[og:title]', locator: { strategy: 'meta', key: 'og:title' } }));
 	}
 
 	const image = doc.meta('og:image') || doc.meta('twitter:image');
 	if (image) {
-		candidates.push(candidate({ field: 'image', value: image, source: 'meta', path: 'meta[og:image]' }));
+		candidates.push(candidate({ field: 'image', value: image, source: 'meta', path: 'meta[og:image]', locator: { strategy: 'meta', key: 'og:image' } }));
 	}
 
 	const description = doc.meta('og:description') || doc.meta('description');
 	if (description) {
 		candidates.push(candidate({
 			field: 'description', value: description.trim(), source: 'meta', path: 'meta[og:description]',
+			locator: { strategy: 'meta', key: 'og:description' },
 		}));
 	}
 
 	const brand = doc.meta('product:brand') || doc.meta('og:brand');
 	if (brand) {
-		candidates.push(candidate({ field: 'brand', value: brand.trim(), source: 'meta', path: 'meta[product:brand]' }));
+		candidates.push(candidate({ field: 'brand', value: brand.trim(), source: 'meta', path: 'meta[product:brand]', locator: { strategy: 'meta', key: 'product:brand' } }));
 	}
 
 	// Il titolo della pagina come ultima risorsa, con peso ancora piu' basso:
@@ -85,7 +89,7 @@ function extract(doc) {
 	if (!title) {
 		const pageTitle = doc.title();
 		if (pageTitle) {
-			candidates.push(candidate({ field: 'title', value: pageTitle, source: 'title', path: 'title' }));
+			candidates.push(candidate({ field: 'title', value: pageTitle, source: 'title', path: 'title', locator: { strategy: 'css', selector: 'title', attr: null } }));
 		}
 	}
 

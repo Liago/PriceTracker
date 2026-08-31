@@ -51,9 +51,22 @@ function extract(doc) {
 		return found.length > 0 ? found.first() : null;
 	};
 
+	// Il localizzatore e' un selettore CSS vero, con l'attributo da leggere:
+	// una ricetta microdata e' riapplicabile senza rifare la ricerca.
+	const locatorFor = (name, element) => {
+		const tag = (element.tagName || element.name || '').toLowerCase();
+		const attr = tag === 'meta' ? 'content'
+			: (tag === 'link' || tag === 'a') ? 'href'
+			: tag === 'img' ? 'src'
+			: null;
+		return { strategy: 'css', selector: `[itemprop="${name}"]`, attr };
+	};
+
+	const locators = {};
 	const readProp = (name) => {
 		const node = first(`[itemprop="${name}"]`);
 		if (!node) return null;
+		locators[name] = locatorFor(name, node[0]);
 		return propValue($, node[0]);
 	};
 
@@ -64,6 +77,7 @@ function extract(doc) {
 			candidates.push(candidate({
 				field: 'price', value, raw: priceRaw, source: 'microdata',
 				path: '[itemprop=price]', evidence: String(priceRaw).slice(0, 60),
+				locator: locators.price,
 			}));
 		}
 	}
@@ -73,6 +87,7 @@ function extract(doc) {
 		candidates.push(candidate({
 			field: 'currency', value: normalizeCurrency(currencyRaw, { url: doc.url, fallback: null }),
 			raw: currencyRaw, source: 'microdata', path: '[itemprop=priceCurrency]',
+			locator: locators.priceCurrency,
 		}));
 	}
 
@@ -81,6 +96,7 @@ function extract(doc) {
 		candidates.push(candidate({
 			field: 'availability', value: normalizeAvailability(availabilityRaw),
 			raw: availabilityRaw, source: 'microdata', path: '[itemprop=availability]',
+			locator: locators.availability,
 		}));
 	}
 
@@ -99,6 +115,7 @@ function extract(doc) {
 		if (value) {
 			candidates.push(candidate({
 				field, value: String(value).trim(), source: 'microdata', path: `[itemprop=${prop}]`,
+				locator: locators[prop],
 			}));
 		}
 	}

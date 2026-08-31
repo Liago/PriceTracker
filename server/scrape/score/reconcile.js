@@ -91,6 +91,10 @@ function reconcile(candidates, context = {}) {
 			path: resolved.winner.path,
 			evidence: resolved.winner.evidence,
 			weight: resolved.winner.weight,
+			// Il localizzatore deve sopravvivere alla riconciliazione: e' cio'
+			// che il learner salva nella ricetta. Senza, il campo risolto
+			// descrive il risultato ma non sa rifarlo.
+			locator: resolved.winner.locator || null,
 			agreeingSources: resolved.agreeingSources,
 			competingCount: resolved.competing.length,
 			meta: resolved.winner.meta,

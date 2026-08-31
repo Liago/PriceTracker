@@ -31,10 +31,14 @@ const SOURCE_WEIGHTS = Object.freeze({
  * @param {string} [spec.evidence] - frammento leggibile da mostrare a un umano
  * @param {number} [spec.weight] - sovrascrive il peso base della sorgente
  * @param {object} [spec.meta] - segnali aggiuntivi per lo scoring
+ * @param {object} [spec.locator] - descrittore ESEGUIBILE di come ritrovare
+ *   questo valore: {strategy, ...}. E' cio' che il learner salva nella ricetta
+ *   e che l'applier riesegue. Il campo `path` accanto e' solo leggibile
+ *   dall'uomo, e non basta per rifare il lavoro.
  * @returns {object}
  */
 function candidate(spec) {
-	const { field, value, raw, source, path, evidence, weight, meta } = spec;
+	const { field, value, raw, source, path, evidence, weight, meta, locator } = spec;
 	return {
 		field,
 		value,
@@ -44,6 +48,7 @@ function candidate(spec) {
 		evidence: evidence || null,
 		weight: typeof weight === 'number' ? weight : (SOURCE_WEIGHTS[source] ?? 0.5),
 		meta: meta || {},
+		locator: locator || null,
 	};
 }
 

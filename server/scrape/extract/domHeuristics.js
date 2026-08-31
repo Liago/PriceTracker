@@ -19,6 +19,7 @@
 
 const { candidate, compact } = require('./candidate');
 const { parsePriceDetailed } = require('../normalize/price');
+const { cssPath } = require('./cssPath');
 
 const CURRENCY_MARKER = /[€$£¥₹₽]|\b(?:EUR|USD|GBP|CHF|SEK|NOK|DKK|PLN)\b/i;
 const NUMBER = /\d[\d.,\s'’]*\d|\d/;
@@ -328,13 +329,19 @@ function extract(doc, context = {}) {
 	const ambiguous = runnerUp !== undefined && (best.score - runnerUp.score) <= 0.10;
 	if (!ambiguous) best.score += 0.10;
 
+	// Il selettore del vincitore e' cio' che rende utile una ricetta DOM: la
+	// prossima volta si rilegge quell'elemento invece di rifare tutta
+	// l'euristica, e il risultato e' riproducibile invece che ricalcolato.
+	const selector = cssPath($, best.element);
+
 	const candidates = [candidate({
 		field: 'price',
 		value: best.value,
 		raw: best.text,
 		source: 'dom',
-		path: best.signature || 'dom',
+		path: selector || best.signature || 'dom',
 		evidence: best.text,
+		locator: selector ? { strategy: 'css', selector, attr: null } : null,
 		weight: Math.min(0.55 + best.score * 0.3, 0.85),
 		meta: {
 			score: Math.round(best.score * 100) / 100,
@@ -352,12 +359,69 @@ function extract(doc, context = {}) {
 		const code = normalizeCurrency(currencyMatch[0], { url: doc.url, fallback: null });
 		if (code) {
 			candidates.push(candidate({
-				field: 'currency', value: code, raw: currencyMatch[0], source: 'dom', path: best.signature,
+				field: 'currency', value: code, raw: currencyMatch[0], source: 'dom',
+				path: selector || best.signature,
+				locator: selector ? { strategy: 'css', selector, attr: null } : null,
 			}));
 		}
 	}
 
+	// Titolo e immagine dal DOM nudo.
+	//
+	// Non e' un extra: senza di essi una pagina prodotto priva di metadati
+	// viene penalizzata dalla riconciliazione come "non sembra una scheda
+	// prodotto", e la confidenza scende sotto la soglia di apprendimento. Cioe'
+	// proprio gli shop artigianali - quelli per cui questo estrattore esiste -
+	// non riuscirebbero mai a produrre una ricetta.
+	candidates.push(...extractIdentity(doc));
+
 	return compact(candidates);
+}
+
+/**
+ * Titolo e immagine principale ricavati dalla sola struttura.
+ * @param {import('../document').ScrapeDocument} doc
+ * @returns {Array} candidati
+ */
+function extractIdentity(doc) {
+	const $ = doc.$;
+	const found = [];
+
+	const heading = $('h1').first();
+	if (heading.length > 0) {
+		const title = heading.text().replace(/\s+/g, ' ').trim();
+		if (title.length > 1 && title.length < 200) {
+			found.push(candidate({
+				field: 'title', value: title, source: 'dom', path: 'h1',
+				locator: { strategy: 'css', selector: 'h1', attr: null },
+			}));
+		}
+	}
+
+	// Prima immagine di contenuto: si scartano loghi, icone, pixel di
+	// tracciamento e placeholder, che non descrivono il prodotto.
+	const SKIP = /logo|icon|sprite|placeholder|pixel|tracking|avatar|badge|banner/i;
+	let image = null;
+	$('img').each((_, element) => {
+		if (image) return;
+		const node = $(element);
+		const src = node.attr('src') || node.attr('data-src');
+		if (!src || src.startsWith('data:')) return;
+		const signature = `${src} ${node.attr('alt') || ''} ${node.attr('class') || ''} ${node.attr('id') || ''}`;
+		if (SKIP.test(signature)) return;
+		if (isOffTopic($, element) || isHidden($, element)) return;
+		image = { src, element };
+	});
+
+	if (image) {
+		const selector = cssPath($, image.element);
+		found.push(candidate({
+			field: 'image', value: image.src, source: 'dom', path: selector || 'img',
+			locator: selector ? { strategy: 'css', selector, attr: 'src' } : null,
+		}));
+	}
+
+	return found;
 }
 
 module.exports = {
@@ -367,6 +431,7 @@ module.exports = {
 	isStruck,
 	isHidden,
 	isOffTopic,
+	extractIdentity,
 	hasAccessoryAncestor,
 	nearbyText,
 	treeDistance,

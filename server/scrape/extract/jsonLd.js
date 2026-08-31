@@ -116,6 +116,13 @@ function offersOf(productNode, basePath) {
  * @param {import('../document').ScrapeDocument} doc
  * @returns {Array} candidati
  */
+// Per le sorgenti strutturate il localizzatore e' la strategia stessa: la
+// configurazione utile da salvare e' "per questo dominio il prezzo si legge
+// dal JSON-LD", che e' cio' che permette al fast path di saltare gli altri
+// estrattori. Un puntatore per indice sarebbe piu' preciso e insieme piu'
+// fragile, perche' l'ordine dei blocchi cambia fra un rilascio e l'altro.
+const LOCATOR = Object.freeze({ strategy: 'jsonld' });
+
 function extract(doc) {
 	const products = findProducts(doc.jsonLdBlocks());
 	if (products.length === 0) return [];
@@ -128,12 +135,14 @@ function extract(doc) {
 
 	if (node.name) {
 		candidates.push(candidate({
+			locator: LOCATOR,
 			field: 'title', value: String(node.name).trim(), source: 'jsonld', path: `${path}.name`,
 		}));
 	}
 
 	if (node.description) {
 		candidates.push(candidate({
+			locator: LOCATOR,
 			field: 'description', value: String(node.description).trim(),
 			source: 'jsonld', path: `${path}.description`,
 		}));
@@ -144,6 +153,7 @@ function extract(doc) {
 		const imageUrl = typeof image === 'string' ? image : image.url || image.contentUrl;
 		if (imageUrl) {
 			candidates.push(candidate({
+				locator: LOCATOR,
 				field: 'image', value: imageUrl, source: 'jsonld', path: `${path}.image`,
 			}));
 		}
@@ -154,6 +164,7 @@ function extract(doc) {
 		const brandName = typeof brand === 'string' ? brand : brand.name;
 		if (brandName) {
 			candidates.push(candidate({
+				locator: LOCATOR,
 				field: 'brand', value: String(brandName).trim(), source: 'jsonld', path: `${path}.brand`,
 			}));
 		}
@@ -162,6 +173,7 @@ function extract(doc) {
 	for (const key of ['gtin13', 'gtin12', 'gtin8', 'gtin', 'mpn', 'sku']) {
 		if (node[key]) {
 			candidates.push(candidate({
+				locator: LOCATOR,
 				field: key.startsWith('gtin') ? 'gtin' : key,
 				value: String(node[key]).trim(), source: 'jsonld', path: `${path}.${key}`,
 			}));
@@ -176,6 +188,7 @@ function extract(doc) {
 			const value = parsePrice(priceInfo.value);
 			if (value !== null) {
 				candidates.push(candidate({
+					locator: LOCATOR,
 					field: 'price', value, raw: priceInfo.value,
 					source: 'jsonld', path: priceInfo.path,
 					evidence: `offers -> ${priceInfo.value}`,
@@ -188,6 +201,7 @@ function extract(doc) {
 			|| asArray(offer.priceSpecification)[0]?.priceCurrency;
 		if (currencyRaw) {
 			candidates.push(candidate({
+				locator: LOCATOR,
 				field: 'currency', value: normalizeCurrency(currencyRaw, { url: doc.url, fallback: null }),
 				raw: currencyRaw, source: 'jsonld', path: `${offerPath}.priceCurrency`,
 			}));
@@ -195,6 +209,7 @@ function extract(doc) {
 
 		if (offer.availability) {
 			candidates.push(candidate({
+				locator: LOCATOR,
 				field: 'availability', value: normalizeAvailability(offer.availability),
 				raw: offer.availability, source: 'jsonld', path: `${offerPath}.availability`,
 			}));
@@ -202,6 +217,7 @@ function extract(doc) {
 
 		if (offer.itemCondition) {
 			candidates.push(candidate({
+				locator: LOCATOR,
 				field: 'condition', value: String(offer.itemCondition).split('/').pop(),
 				raw: offer.itemCondition, source: 'jsonld', path: `${offerPath}.itemCondition`,
 			}));
@@ -212,6 +228,7 @@ function extract(doc) {
 			const sellerName = typeof seller === 'string' ? seller : seller.name;
 			if (sellerName) {
 				candidates.push(candidate({
+					locator: LOCATOR,
 					field: 'seller', value: String(sellerName).trim(),
 					source: 'jsonld', path: `${offerPath}.seller`,
 				}));
