@@ -105,13 +105,28 @@ VITE_API_URL=http://localhost:3000
 
 1. Create a new project at [supabase.com](https://supabase.com)
 2. Get your project URL, anon key, and service_role key from Project Settings > API
-3. **Database Schema**: Run the provided SQL scripts in `server/database/` or copy from `server/database/full_schema.sql` (if available) to set up:
-    - `products`: Stores tracked items
-    - `price_history`: Historical price data
-    - `user_settings`: User preferences
-    - `notifications`: User alerts
-    - `supported_domains`: Domain whitelist
-4. **RLS Policies**: Ensure RLS is enabled and policies are applied (see `server/database/policies.sql` and `fix_notifications_policies.sql`)
+3. **Database Schema**: apply the versioned migrations instead of pasting SQL by hand:
+
+    ```bash
+    cd server
+    export DATABASE_URL="postgresql://postgres:PASSWORD@db.PROJECT.supabase.co:5432/postgres"
+    npm run migrate:status   # show what is pending, without changing anything
+    npm run migrate          # apply pending migrations
+    ```
+
+    `DATABASE_URL` is the Postgres connection string from Project Settings >
+    Database. The anon and service role keys are not enough: `supabase-js`
+    cannot run DDL.
+
+    The migrations create and keep in sync `products`, `price_history`,
+    `user_settings`, `notifications` and `supported_domains`, together with
+    their RLS policies and indexes. They are idempotent and safe to run against
+    a database that already has the schema. See
+    `server/database/migrations/README.md` for conventions.
+
+    The loose SQL files at the repository root (`schema.sql`,
+    `notifications_schema.sql`, `user_settings_schema.sql`) are superseded by
+    `server/database/migrations/000_baseline.sql` and kept only for reference.
 
 ## Running the Application
 
@@ -185,6 +200,19 @@ The scraper uses generic selectors and Open Graph meta tags to extract product i
 - ESLint configured for React
 - Follow existing code patterns
 - Use functional components with hooks
+
+### Tests
+
+```bash
+cd server
+npm test          # run the suite once
+npm run test:watch
+```
+
+Scrapers are tested against HTML fixtures saved under `server/test/fixtures/`,
+with no network and no browser: `server/test/helpers/fakePage.js` runs the body
+of `page.evaluate()` against a jsdom document. Add a fixture for every
+extraction bug you fix.
 
 ### Adding New Features
 1. Create feature branch from main

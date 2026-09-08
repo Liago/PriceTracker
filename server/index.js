@@ -38,68 +38,65 @@ app.get('/', (req, res) => {
 const cron = require('node-cron');
 const { checkProductPrices } = require('./services/priceTracker');
 
-// Price tracking cron job
-// Price tracking cron job
-// Run every minute to check if any product needs updating based on user settings
-const cronExpression = '* * * * *';
+// Lo scheduler locale gira SOLO in sviluppo. In produzione il lavoro e'
+// governato dalle funzioni schedulate di Netlify (dispatcher e worker): avere
+// due scheduler con logiche diverse - node-cron ogni minuto qui, una function
+// oraria la' - significava comportamenti diversi fra locale e produzione
+// (difetto D10).
+if (process.env.NODE_ENV !== 'production' && !process.env.NETLIFY) {
+	const cronExpression = process.env.DEV_CRON || '*/5 * * * *';
+	console.log(`[Server] Controllo prezzi in sviluppo: ${cronExpression}`);
+	cron.schedule(cronExpression, () => {
+		console.log('[Server] Controllo prezzi schedulato (sviluppo)');
+		checkProductPrices();
+	});
+} else {
+	console.log('[Server] Scheduler locale disattivato: in produzione decidono dispatcher e worker');
+}
 
-console.log(`[Server] Price tracking cron scheduled: ${cronExpression} (every minute)`);
-
-cron.schedule(cronExpression, () => {
-	console.log('[Server] Running scheduled price check...');
-	checkProductPrices();
-});
-
-// Optional: Run on startup (commented out by default)
-// setTimeout(() => {
-//   console.log('[Server] Running initial price check...');
-//   checkProductPrices();
-// }, 5000);
-
-// Manual trigger endpoint (optional, useful for testing)
-app.post('/api/check-prices', async (req, res) => {
-	console.log('[Server] Manual price check triggered');
-	checkProductPrices();
-	res.json({ message: 'Price check started in background' });
-});
+const { createClient } = require('@supabase/supabase-js');
+const { registerRoutes } = require('./api/routes');
 
 // Rate Limiting
 const rateLimit = require('express-rate-limit');
 
 const apiLimiter = rateLimit({
-	windowMs: 15 * 60 * 1000, // 15 minutes
+	windowMs: 15 * 60 * 1000,
 	max: 100,
 	standardHeaders: true,
 	legacyHeaders: false,
 });
 
 const scrapeLimiter = rateLimit({
-	windowMs: 60 * 1000, // 1 minute
+	windowMs: 60 * 1000,
 	max: 10,
-	message: { error: 'Too many scraping requests, please try again later.' }
+	message: { error: 'Troppe richieste di analisi, riprova fra poco.' },
 });
 
-app.use('/api', apiLimiter);
-
-const { scrapeProduct } = require('./services/scraper');
-
-const { validateProductUrl } = require('./utils/validation');
-
-app.post('/api/scrape', scrapeLimiter, async (req, res) => {
-	const { url } = req.body;
-
-	try {
-		const validUrl = await validateProductUrl(url);
-		const data = await scrapeProduct(validUrl);
-		res.json(data);
-	} catch (error) {
-		if (error.message.includes('URL') || error.message.includes('Domain')) {
-			return res.status(400).json({ error: error.message });
-		}
-		console.error('Scraping error:', error);
-		res.status(500).json({ error: 'Failed to scrape product' });
+let adminClient = null;
+function getClient() {
+	if (!adminClient) {
+		adminClient = createClient(
+			process.env.SUPABASE_URL,
+			process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
+		);
 	}
+	return adminClient;
+}
+
+const router = express.Router();
+router.use(apiLimiter);
+router.post('/scrape', scrapeLimiter);
+registerRoutes({ getClient })(router);
+
+// Innesco manuale del controllo, utile in sviluppo.
+router.post('/check-prices', async (req, res) => {
+	console.log('[Server] Controllo prezzi avviato a mano');
+	checkProductPrices();
+	res.json({ message: 'Controllo avviato in background' });
 });
+
+app.use('/api', router);
 
 app.listen(PORT, () => {
 	console.log(`Server is running on port ${PORT}`);

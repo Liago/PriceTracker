@@ -3,38 +3,17 @@ import { Outlet, useOutletContext } from 'react-router-dom'
 import Header from './Header'
 import AddProductModal from './AddProductModal'
 import { Toaster } from 'sonner'
-import { scrapeProduct } from '../lib/api'
-import { supabase } from '../lib/supabase'
-import { parsePrice } from '../lib/utils'
-import { useAuth } from '../context/AuthContext' // Needed for user.id in addProduct logic
+import { addProduct } from '../lib/api'
 
 export default function Layout() {
-  const { user } = useAuth()
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [refreshTrigger, setRefreshTrigger] = useState(0) // Simple counter to trigger refreshes
 
   const handleAddProduct = async (url) => {
-    // Shared Logic for Adding Product
-    const data = await scrapeProduct(url)
-    
-    // Save to Supabase
-    const { error } = await supabase.from('products').insert([
-      {
-        user_id: user.id,
-        url,
-        name: data.title,
-        image: data.image,
-        description: data.description,
-        current_price: parsePrice(data.price, data.currency),
-        currency: data.currency,
-        store: data.store,
-        details: data.details
-      }
-    ])
-
-    if (error) throw error
-    
-    // Trigger refresh in children
+    // La scrittura avviene sul server: il client non tocca piu' products.
+    // E' il server a decidere se il prezzo letto e' affidabile abbastanza da
+    // avviare una storia prezzi.
+    await addProduct({ url })
     setRefreshTrigger(prev => prev + 1)
   }
 

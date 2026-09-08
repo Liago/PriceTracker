@@ -25,6 +25,14 @@
   to = "/index.html"
   status = 200
 
-# Scheduled Functions (Cron)
-[functions.scheduled-check]
-  schedule = "0 * * * *"
+# Funzioni schedulate.
+#
+# Il dispatcher accoda soltanto, quindi termina in fretta qualunque sia il
+# numero di prodotti. I worker consumano la coda: piu' invocazioni ravvicinate
+# smaltiscono un lotto alla volta, ognuna entro il proprio budget di tempo,
+# invece di un unico ciclo che supera il timeout.
+[functions.dispatcher]
+  schedule = "*/10 * * * *"
+
+[functions.worker]
+  schedule = "*/2 * * * *"

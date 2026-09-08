@@ -5,14 +5,18 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const puppeteer = addExtra(puppeteerCore);
 puppeteer.use(StealthPlugin());
 
-const ScraperFactory = require('./scrapers/ScraperFactory');
 const { userAgentManager } = require('../utils/userAgentManager');
 const { createProxyManagerFromEnv } = require('../utils/proxyManager');
 const { captchaDetector } = require('../utils/captchaDetector');
+const { resolveLocalExecutablePath } = require('../utils/browserPath');
+const { interpret } = require('../scrape');
 
 // Configuration
 const MAX_RETRIES = parseInt(process.env.SCRAPER_MAX_RETRIES || '3', 10);
 const RETRY_DELAY_BASE = parseInt(process.env.SCRAPER_RETRY_DELAY || '1000', 10);
+
+// La soglia sotto la quale il fast path non basta e si passa alla scoperta.
+const FAST_PATH_THRESHOLD = parseFloat(process.env.SCRAPE_FAST_PATH_THRESHOLD || '0.85');
 
 // Initialize proxy manager
 const proxyManager = createProxyManagerFromEnv();
@@ -67,11 +71,19 @@ async function createBrowser(proxy = null) {
 		});
 	} else {
 		// Local Development
-		const localExecutablePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+		const localExecutablePath = resolveLocalExecutablePath();
+		if (localExecutablePath) {
+			console.log(`[Scraper] Chrome locale: ${localExecutablePath}`);
+		} else {
+			console.log('[Scraper] Nessun Chrome trovato nei path noti, risoluzione lasciata a puppeteer (channel: chrome)');
+		}
 
 		return puppeteer.launch({
 			channel: 'chrome',
-			executablePath: localExecutablePath,
+			// Omesso quando non risolto: in puppeteer-core executablePath ha la
+			// precedenza su channel, quindi passarlo undefined e' cio' che
+			// permette al fallback per channel di entrare in gioco.
+			...(localExecutablePath ? { executablePath: localExecutablePath } : {}),
 			headless: 'new',
 			args: [
 				'--no-sandbox',
@@ -83,12 +95,20 @@ async function createBrowser(proxy = null) {
 }
 
 /**
- * Scrape a product with retry logic
- * @param {string} url - URL to scrape
- * @param {number} attempt - Current attempt number (for internal use)
- * @returns {Promise<Object>} Scraped data
+ * Scarica e interpreta una pagina prodotto, con retry.
+ *
+ * @param {string} url
+ * @param {object} [options]
+ * @param {object|null} [options.recipe] - ricetta attiva del dominio
+ * @param {number|null} [options.lastKnownPrice] - premia la coerenza storica
+ * @param {number} [options.attempt] - uso interno
+ * @returns {Promise<Object>}
  */
-async function scrapeProduct(url, attempt = 0) {
+async function scrapeProduct(url, options = {}) {
+	// Compatibilita': la firma precedente era scrapeProduct(url, attempt).
+	const normalized = typeof options === 'number' ? { attempt: options } : (options || {});
+	const { recipe = null, lastKnownPrice = null, attempt = 0 } = normalized;
+
 	let browser = null;
 	const proxy = proxyManager.hasProxies() ? proxyManager.getRandomProxy() : null;
 
@@ -168,18 +188,27 @@ async function scrapeProduct(url, attempt = 0) {
 			}
 		}
 
-		// Use factory to get strategy
-		const scraper = ScraperFactory.getScraper(url, page);
-		const data = await scraper.scrape(url);
+		// Interpretazione: nessuno store ha codice dedicato. Il browser serve
+		// solo a OTTENERE l'HTML; a leggerlo e' la pipeline generica, guidata
+		// dalla ricetta del dominio quando ce n'e' una.
+		const html = await page.content();
+		const data = interpret(html, {
+			url,
+			recipe,
+			lastKnownPrice,
+			antiBotDetected: captchaResult.detected,
+			fastPathThreshold: FAST_PATH_THRESHOLD,
+		});
 
-		// Fallback/Cleanup data if needed
 		if (!data.title) data.title = await page.title();
 
-		// Debug info
 		data.debug = {
 			url,
-			strategy: scraper.constructor.name,
-			foundPrice: !!data.price,
+			source: data.fields?.price?.source ?? null,
+			confidence: data.confidence,
+			usedFastPath: data.usedFastPath,
+			recipeId: data.recipeId,
+			foundPrice: data.price !== null,
 			attempt: attempt + 1,
 			userAgent: userAgent.substring(0, 50),
 			proxyUsed: !!proxy,
@@ -214,7 +243,7 @@ async function scrapeProduct(url, attempt = 0) {
 			const delay = getBackoffDelay(attempt);
 			console.log(`[Scraper] Retrying in ${Math.round(delay / 1000)}s...`);
 			await sleep(delay);
-			return scrapeProduct(url, attempt + 1);
+			return scrapeProduct(url, { recipe, lastKnownPrice, attempt: attempt + 1 });
 		}
 
 		throw error;

@@ -1,92 +1,55 @@
 const { createClient } = require('@supabase/supabase-js');
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
+/**
+ * Client amministrativo, creato al primo uso e non al require.
+ *
+ * Crearlo a livello di modulo faceva fallire il caricamento di CHIUNQUE
+ * importasse questo file quando le variabili d'ambiente non erano ancora
+ * disponibili - inclusa la function api, che importa priceTracker solo per un
+ * endpoint di comodo. Un modulo non deve rendere impossibile il caricamento di
+ * chi lo importa.
+ */
+let supabaseAdminInstance = null;
+function admin() {
+	if (!supabaseAdminInstance) {
+		const url = process.env.SUPABASE_URL;
+		const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
+		if (!url || !key) {
+			throw new Error('SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY sono necessarie per il controllo prezzi');
+		}
+		supabaseAdminInstance = createClient(url, key);
+	}
+	return supabaseAdminInstance;
+}
 
-// Public client with RLS (for backward compatibility if needed)
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-// Service role client for scheduled operations (bypasses RLS)
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseKey;
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
-
-// Import email service
-const { sendPriceDropNotification } = require('./emailService');
-
-// Default settings (fallback)
-const DEFAULT_SCRAPE_DELAY = 2000;
-const DEFAULT_MAX_RETRIES = 1;
+const { normalizeUserSettings } = require('./userSettings');
+const { checkProduct } = require('./productChecker');
+const { createTrackingRepository } = require('./trackingRepository');
+const { createRecipeStore } = require('../scrape/recipe/store');
+const { learnRecipe } = require('../scrape/recipe/learner');
 
 async function getUserSettings(userId) {
-	const { data, error } = await supabaseAdmin
+	const { data, error } = await admin()
 		.from('user_settings')
 		.select('*')
 		.eq('user_id', userId)
 		.single();
 
-	if (error || !data) {
-		return {
-			scrape_delay: DEFAULT_SCRAPE_DELAY,
-			max_retries: DEFAULT_MAX_RETRIES
-		};
+	if (error) {
+		console.warn(`[Price Tracker] Impossibile leggere le impostazioni di ${userId}, uso i default:`, error.message);
 	}
 
-	return {
-		scrape_delay: data.scrape_delay || DEFAULT_SCRAPE_DELAY,
-		max_retries: data.max_retries || DEFAULT_MAX_RETRIES
-	};
+	return normalizeUserSettings(error ? null : data);
 }
 
-// Import scraping logic
 const { scrapeProduct } = require('./scraper');
-// Import email service
-
-
-function parsePrice(priceStr, currency) {
-	if (!priceStr) return 0;
-	let clean = priceStr.replace(/[^0-9.,]/g, '');
-	if (!clean) return 0;
-
-	const dotCount = (clean.match(/\./g) || []).length;
-	const commaCount = (clean.match(/,/g) || []).length;
-
-	if (dotCount === 0 && commaCount === 0) {
-		return parseFloat(clean) || 0;
-	}
-
-	if (dotCount > 0 && commaCount > 0) {
-		const lastDot = clean.lastIndexOf('.');
-		const lastComma = clean.lastIndexOf(',');
-		if (lastDot > lastComma) {
-			clean = clean.replace(/,/g, '');
-		} else {
-			clean = clean.replace(/\./g, '').replace(',', '.');
-		}
-	} else if (dotCount > 0) {
-		const parts = clean.split('.');
-		const lastPart = parts[parts.length - 1];
-		if (lastPart.length <= 2 && parts.length === 2) {
-			// Keep as is
-		} else if (lastPart.length === 3 && parts.length === 2) {
-			clean = clean.replace(/\./g, '');
-		} else {
-			clean = clean.replace(/\./g, '');
-		}
-	} else {
-		const parts = clean.split(',');
-		const lastPart = parts[parts.length - 1];
-		if (lastPart.length <= 2 && parts.length === 2) {
-			clean = clean.replace(',', '.');
-		} else {
-			clean = clean.replace(/,/g, '');
-		}
-	}
-
-	return parseFloat(clean) || 0;
-}
 
 async function checkProductPrices() {
 	console.log('[Price Tracker] Starting price check...');
+
+	const supabaseAdmin = admin();
+	const repo = createTrackingRepository(supabaseAdmin);
+	const recipes = createRecipeStore({ client: supabaseAdmin });
 
 	try {
 		// Fetch all active products (monitoring_until is null or in the future)
@@ -119,112 +82,71 @@ async function checkProductPrices() {
 		for (const [userId, userProductList] of Object.entries(userProducts)) {
 			// Fetch user settings
 			const userSettings = await getUserSettings(userId);
-			const intervalMinutes = userSettings.price_check_interval || 360; // Default 6 hours (360 mins)
+			const intervalMinutes = userSettings.priceCheckIntervalMinutes;
 
 			for (const product of userProductList) {
 				try {
-					// Check if it's time to update this product
+					// E' il momento di controllare questo prodotto?
 					const lastChecked = product.last_checked_at ? new Date(product.last_checked_at) : new Date(0);
 					const nextCheck = new Date(lastChecked.getTime() + intervalMinutes * 60000);
-					const now = new Date();
+					if (new Date() < nextCheck) continue;
 
-					if (now < nextCheck) {
-						// Not time yet
-						continue;
-					}
+					console.log(`[Price Tracker] Controllo: ${product.name}`);
 
-					console.log(`[Price Tracker] Checking: ${product.name} (Last check: ${lastChecked.toISOString()})`);
+					// Ricetta attiva del dominio: se c'e', lo scrape prende il fast
+					// path e salta la scoperta completa.
+					const recipe = await recipes.getActiveRecipe(product.url);
 
-					// Scrape current price
-					const scrapedData = await scrapeProduct(product.url);
-					const newPrice = parsePrice(scrapedData.price, scrapedData.currency);
+					let lastResult = null;
+					const scrape = async (url) => {
+						lastResult = await scrapeProduct(url, {
+							recipe,
+							lastKnownPrice: product.current_price ?? null,
+						});
+						return lastResult;
+					};
 
-					if (!newPrice || newPrice === 0) {
-						console.log(`[Price Tracker] Could not extract price for ${product.name}`);
-						continue;
-					}
+					// La decisione sta in productChecker, la scrittura nel repository.
+					// Qui resta solo l'orchestrazione.
+					const outcome = await checkProduct({ product, scrape, repo });
 
-					const oldPrice = product.current_price;
-					const priceChanged = Math.abs(newPrice - oldPrice) > 0.01;
-
-					// Update product with new price and last_checked_at
-					const { error: updateError } = await supabaseAdmin
-						.from('products')
-						.update({
-							current_price: newPrice,
-							last_checked_at: new Date().toISOString()
-						})
-						.eq('id', product.id);
-
-					if (updateError) {
-						console.error(`[Price Tracker] Error updating product ${product.id}:`, updateError);
-					}
-
-					// If price changed, save to price_history
-					if (priceChanged) {
-						console.log(`[Price Tracker] Price changed for ${product.name}: ${oldPrice} → ${newPrice}`);
-
-						const { error: historyError } = await supabaseAdmin
-							.from('price_history')
-							.insert({
-								product_id: product.id,
-								price: newPrice
-							});
-
-						if (historyError) {
-							console.error(`[Price Tracker] Error saving price history:`, historyError);
-						}
-
-						// Check if price dropped below target
-						if (product.target_price && newPrice <= product.target_price && oldPrice > product.target_price) {
-							console.log(`[Price Tracker] 🎉 Target price reached for ${product.name}!`);
-
-							// Create notification
-							const { error: notifError } = await supabaseAdmin
-								.from('notifications')
-								.insert({
-									user_id: product.user_id,
-									product_id: product.id,
-									type: 'price_drop',
-									old_price: oldPrice,
-									new_price: newPrice
-								});
-
-							if (notifError) {
-								console.error(`[Price Tracker] Error creating notification:`, notifError);
-							}
-
-							// Send Email Notification
-							try {
-								// Fetch user email if not already cached/in memory?
-								// Only Admins can read auth.users. supabaseAdmin has admin key.
-								const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(userId);
-
-								if (userError || !userData || !userData.user) {
-									console.error(`[Price Tracker] Could not fetch user email for ${userId}:`, userError);
-								} else {
-									const userEmail = userData.user.email;
-									await sendPriceDropNotification(userEmail, product, oldPrice, newPrice);
-									console.log(`[Price Tracker] Email notification sent to ${userEmail}`);
-								}
-							} catch (emailErr) {
-								console.error(`[Price Tracker] Error sending email:`, emailErr);
+					// Il ciclo di apprendimento: la ricetta guadagna o perde
+					// credito a seconda di come e' andata, e una scoperta
+					// riuscita su un dominio senza ricetta ne genera una.
+					if (recipe) {
+						await recipes.recordOutcome(recipe, outcome.accepted);
+					} else if (outcome.accepted && lastResult) {
+						const { recipe: learned } = learnRecipe(lastResult, { url: product.url });
+						if (learned) {
+							const { saved } = await recipes.saveLearnedRecipe(learned);
+							if (saved) {
+								console.log(`[Price Tracker] Ricetta appresa per ${learned.domain} (v${saved.version})`);
 							}
 						}
+					}
+
+					if (outcome.accepted) {
+						console.log(
+							`[Price Tracker] ${product.name}: ${outcome.price} ${outcome.currency}` +
+							`${outcome.priceChanged ? ` (era ${outcome.previousPrice})` : ' (invariato)'}`
+						);
+					} else {
+						// Un prezzo rifiutato non e' un silenzio: e' registrato come
+						// osservazione e visibile nello stato di salute del prodotto.
+						console.warn(
+							`[Price Tracker] ${product.name}: prezzo NON accettato ` +
+							`(${outcome.reasons.join(', ')}), salute: ${outcome.health}`
+						);
 					}
 
 					// Delay between requests to avoid rate limiting (use user settings)
-					await new Promise(resolve => setTimeout(resolve, userSettings.scrape_delay));
+					await new Promise(resolve => setTimeout(resolve, userSettings.scrapeDelayMs));
 
 				} catch (error) {
-					console.error(`[Price Tracker] Error checking product ${product.id}:`, error.message);
-
-					// Retry once if user settings allow
-					if (userSettings.max_retries > 0) {
-						console.log(`[Price Tracker] Retrying ${product.name}...`);
-						await new Promise(resolve => setTimeout(resolve, 5000));
-						// Could implement retry here, skipping for brevity
-					}
+					// checkProduct gestisce gia' i fallimenti di scrape e li
+					// registra. Qui si finisce solo per errori di persistenza,
+					// che non devono fermare gli altri prodotti.
+					console.error(`[Price Tracker] Errore sul prodotto ${product.id}:`, error.message);
 				}
 			}
 		}

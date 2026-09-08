@@ -20,6 +20,10 @@ const env = cleanEnv(process.env, {
 	PROXY_LIST: str({ default: '', desc: 'Comma-separated list of proxies (format: host:port or host:port:user:pass)' }),
 	SCRAPER_MAX_RETRIES: num({ default: 3, desc: 'Maximum number of retry attempts for failed scrapes' }),
 	SCRAPER_RETRY_DELAY: num({ default: 1000, desc: 'Base delay in ms for retry backoff' }),
+
+	// Shadow mode: la pipeline generica gira accanto agli scraper dedicati e
+	// confronta i risultati, senza scrivere nulla. 'off' per disattivarla.
+	SCRAPE_SHADOW_MODE: str({ default: 'on', choices: ['on', 'off'], desc: 'Run the generic pipeline alongside the legacy scrapers for comparison' }),
 });
 
 module.exports = env;
