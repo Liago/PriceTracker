@@ -13,6 +13,7 @@
  * motore, non il browser dell'utente.
  */
 
+const { jsonBody } = require('./jsonBody');
 const { checkUrl } = require('../scrape/policy/urlPolicy');
 const { scrapeProduct } = require('../services/scraper');
 const { normalizeScrapeResult } = require('../scrape/normalizeResult');
@@ -43,6 +44,12 @@ async function authenticate(req, client) {
  */
 function registerRoutes({ getClient }) {
 	return function attach(router) {
+		// Il body JSON prima di tutto il resto. Su Netlify `express.json()` non
+		// lavora - serverless-http consegna una richiesta gia' completa e
+		// body-parser la salta - e senza questo passaggio ogni route leggerebbe
+		// un Buffer al posto dei suoi campi. Vedi ./jsonBody.js.
+		router.use(jsonBody());
+
 		/**
 		 * Analizza un URL senza salvarlo. Serve all'anteprima nella UI.
 		 */
