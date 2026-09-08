@@ -39,26 +39,6 @@ function remainingBudget(startedAt) {
 }
 
 /**
- * Risponde a un'analisi che non e' arrivata in fondo nel tempo concesso.
- *
- * E' un 504 nostro, con un motivo leggibile. La sola alternativa e' lasciare
- * che sia il proxy a chiudere la connessione, e in quel caso al client arriva
- * una pagina HTML di errore al posto di JSON: nessun codice, nessun motivo,
- * niente da mostrare all'utente.
- */
-function respondBudgetExceeded(res, error) {
-	console.warn(`[API] Budget esaurito (${error.reason}), tier 0: ${error.tier0Skipped || 'ok'}`);
-	return res.status(504).json({
-		error: error.antiBotSuspected
-			? 'Il sito ha rifiutato la lettura automatica'
-			: 'La pagina ha impiegato troppo tempo a rispondere',
-		code: BUDGET_EXCEEDED,
-		reason: error.reason,
-		antiBotSuspected: Boolean(error.antiBotSuspected),
-	});
-}
-
-/**
  * La diagnostica di un tentativo, nella forma che serve a chi legge la
  * risposta.
  *
@@ -73,36 +53,100 @@ function describeAttempt(scraped) {
 	return {
 		tier: debug.tier ?? null,
 		usedBrowser: Boolean(debug.usedBrowser),
+		// `reason` e' il campo che si guarda per primo, quindi porta il motivo
+		// piu' specifico disponibile invece di lasciarlo dedurre dagli altri.
+		reason: debug.degraded || debug.tier0Skipped || null,
 		degraded: debug.degraded || null,
 		tier0Skipped: debug.tier0Skipped || null,
 		htmlBytes: debug.htmlBytes ?? null,
 		pageTitle: debug.pageTitle || null,
+		httpStatus: debug.httpStatus ?? null,
+		navigationTimedOut: debug.navigationTimedOut ?? null,
 		extractors: debug.extractors || null,
 		totalMs: debug.totalMs ?? null,
 	};
 }
 
 /**
- * Non si e' riusciti a leggere la pagina fino in fondo.
+ * Come si racconta un tentativo che non e' arrivato in fondo.
+ *
+ * Ogni voce e' una diagnosi diversa e porta a un'azione diversa: confonderle
+ * dentro un unico «non riuscito» costringe chi legge a indovinare quale delle
+ * tre stia guardando.
+ */
+const FAILURES = Object.freeze({
+	pagina_di_sfida: {
+		status: 503,
+		message: 'Il sito ha risposto con una verifica di sicurezza invece della pagina prodotto',
+	},
+	navigazione_troncata: {
+		status: 504,
+		message: 'La pagina non ha finito di caricarsi nel tempo disponibile',
+	},
+	budget_esaurito: {
+		status: 504,
+		message: 'La pagina ha impiegato troppo tempo a rispondere',
+	},
+	nessun_candidato: {
+		status: 502,
+		message: 'Il sito ha risposto, ma con una pagina vuota',
+	},
+	pagina_troppo_piccola: {
+		status: 502,
+		message: 'Il sito ha risposto, ma con una pagina vuota',
+	},
+});
+
+const DEFAULT_FAILURE = { status: 503, message: 'Non sono riuscito a leggere la pagina fino in fondo' };
+
+/** Il blocco a cui appartiene un motivo, tollerando i suffissi tipo `sfida_datadome`. */
+function classifyFailure(reason, antiBotSuspected) {
+	if (reason && FAILURES[reason]) return FAILURES[reason];
+	if (reason?.startsWith('sfida_') || reason?.startsWith('bloccato_dal_sito') || antiBotSuspected) {
+		return FAILURES.pagina_di_sfida;
+	}
+	return DEFAULT_FAILURE;
+}
+
+/**
+ * Risponde a una lettura che non e' arrivata in fondo.
  *
  * E' diverso da «questa pagina non ha un prezzo», che e' un giudizio
- * definitivo su una pagina che abbiamo visto per intero. Qui non l'abbiamo
- * vista: il browser non e' partito, o il sito ci ha serviato una sfida al suo
- * posto. Dirlo con lo stesso 422 manderebbe l'utente a cercare il problema
- * nell'URL che ha incollato, che e' il posto sbagliato.
+ * definitivo su una pagina vista per intero. Qui non l'abbiamo vista: il
+ * browser non e' partito, la navigazione si e' fermata a meta', o il sito ha
+ * servito una sfida al suo posto. Dirlo con lo stesso 422 manda l'utente a
+ * cercare il problema nell'URL che ha incollato, che e' il posto sbagliato.
  */
-function respondIncomplete(res, scraped) {
-	const attempt = describeAttempt(scraped);
-	console.warn(`[API] Lettura incompleta: ${attempt.degraded}, tier ${attempt.tier}, ${attempt.htmlBytes} byte`);
+function respondIncomplete(res, { scraped = null, error = null }) {
+	const attempt = scraped ? describeAttempt(scraped) : describeError(error);
+	const failure = classifyFailure(attempt.reason, attempt.antiBotSuspected);
 
-	return res.status(503).json({
-		error: attempt.tier0Skipped?.startsWith('sfida_')
-			? 'Il sito ha risposto con una verifica di sicurezza invece della pagina prodotto'
-			: 'Non sono riuscito a leggere la pagina fino in fondo',
+	console.warn(`[API] Lettura incompleta (${attempt.reason}): tier ${attempt.tier}, ${attempt.htmlBytes} byte in ${attempt.totalMs}ms`);
+
+	return res.status(failure.status).json({
+		error: failure.message,
 		code: 'SCRAPE_INCOMPLETE',
-		reason: attempt.degraded,
+		reason: attempt.reason,
 		diagnostics: attempt,
 	});
+}
+
+/** La diagnostica di un tentativo che si e' concluso con un'eccezione. */
+function describeError(error) {
+	return {
+		tier: error?.evidence?.htmlBytes != null ? 1 : 0,
+		usedBrowser: Boolean(error?.evidence?.navigationTimedOut !== undefined),
+		reason: error?.reason || null,
+		tier0Skipped: error?.tier0Skipped || null,
+		antiBotSuspected: Boolean(error?.antiBotSuspected),
+		htmlBytes: error?.evidence?.htmlBytes ?? null,
+		pageTitle: error?.evidence?.pageTitle || null,
+		httpStatus: error?.evidence?.httpStatus ?? null,
+		navigationTimedOut: error?.evidence?.navigationTimedOut ?? null,
+		navigationTimeoutMs: error?.evidence?.navigationTimeoutMs ?? null,
+		extractors: null,
+		totalMs: null,
+	};
 }
 
 /**
@@ -146,7 +190,7 @@ function registerRoutes({ getClient }) {
 				const data = await scrapeProduct(policy.url, { budgetMs: remainingBudget(startedAt) });
 				res.json(normalizeScrapeResult(data, policy.url));
 			} catch (error) {
-				if (error.code === BUDGET_EXCEEDED) return respondBudgetExceeded(res, error);
+				if (error.code === BUDGET_EXCEEDED) return respondIncomplete(res, { error });
 				console.error('[API] Errore di scrape:', error.message);
 				res.status(500).json({ error: 'Analisi della pagina fallita' });
 			}
@@ -183,7 +227,7 @@ function registerRoutes({ getClient }) {
 				// e dire «questa pagina non ha un prezzo» sarebbe un'affermazione
 				// che non siamo in grado di fare.
 				if (data.priceValue === null) {
-					if (scraped.debug?.degraded) return respondIncomplete(res, scraped);
+					if (scraped.debug?.degraded) return respondIncomplete(res, { scraped });
 
 					return res.status(422).json({
 						error: 'Nessun prezzo leggibile su quella pagina',
@@ -259,7 +303,7 @@ function registerRoutes({ getClient }) {
 
 				res.status(201).json({ product, confidence: scraped.confidence ?? null });
 			} catch (error) {
-				if (error.code === BUDGET_EXCEEDED) return respondBudgetExceeded(res, error);
+				if (error.code === BUDGET_EXCEEDED) return respondIncomplete(res, { error });
 				console.error('[API] Aggiunta prodotto fallita:', error.message);
 				res.status(500).json({ error: 'Aggiunta del prodotto fallita' });
 			}
@@ -310,7 +354,7 @@ function registerRoutes({ getClient }) {
 					priceChanged: outcome.priceChanged,
 				});
 			} catch (error) {
-				if (error.code === BUDGET_EXCEEDED) return respondBudgetExceeded(res, error);
+				if (error.code === BUDGET_EXCEEDED) return respondIncomplete(res, { error });
 				console.error('[API] Refresh fallito:', error.message);
 				res.status(500).json({ error: 'Aggiornamento fallito' });
 			}
