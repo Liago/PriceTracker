@@ -64,6 +64,15 @@ const DEFAULT_BUDGET_MS = parseInt(process.env.SCRAPE_REQUEST_BUDGET_MS || '9000
 // tutto il budget nell'avvio, per poi essere troncati durante la navigazione.
 const BROWSER_MIN_MS = parseInt(process.env.SCRAPE_BROWSER_MIN_MS || '8000', 10);
 
+// Tempo lasciato alla risposta dopo l'ultima lettura: chiusura del browser,
+// scritture, serializzazione.
+const RESPONSE_RESERVE_MS = parseInt(process.env.SCRAPE_RESPONSE_RESERVE_MS || '2500', 10);
+
+// Sotto questo tempo una navigazione non ha senso: si troncherebbe, e una
+// pagina troncata non e' un risultato ma un errore che costa quanto un
+// successo.
+const NAVIGATION_MIN_MS = parseInt(process.env.SCRAPE_NAVIGATION_MIN_MS || '4000', 10);
+
 /** Errore riconoscibile: il budget e' finito prima di un risultato. */
 const BUDGET_EXCEEDED = 'SCRAPE_BUDGET_EXCEEDED';
 
@@ -302,7 +311,7 @@ async function runTier0(url, { recipe, lastKnownPrice, timeoutMs, fetchHtmlImpl 
  * @param {object} context
  * @returns {Promise<object>} risultato interpretato
  */
-async function runTier1(url, { recipe, lastKnownPrice, attempt, navigationTimeoutMs }) {
+async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline }) {
 	let browser = null;
 	const proxy = proxyManager.hasProxies() ? proxyManager.getRandomProxy() : null;
 
@@ -318,7 +327,31 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, navigationTimeou
 			console.log(`[Scraper] Using proxy: ${proxy.server}`);
 		}
 
+		// L'avvio di Chromium non e' istantaneo e va scontato dal budget: prima
+		// il timeout di navigazione veniva calcolato PRIMA di arrivare qui, come
+		// se l'avvio fosse gratuito, e il risultato era che la chiamata sforava
+		// il proprio budget di quanto era costato l'avvio - in produzione 10808ms
+		// su 9000 concessi - e la navigazione partiva gia' in ritardo.
+		const launchedAt = Date.now();
 		browser = await createBrowser(proxy);
+		const browserStartMs = Date.now() - launchedAt;
+
+		const navigationTimeoutMs = deadline - Date.now() - RESPONSE_RESERVE_MS;
+		console.log(`[Scraper] Browser avviato in ${browserStartMs}ms, restano ${navigationTimeoutMs}ms per navigare`);
+
+		if (navigationTimeoutMs < NAVIGATION_MIN_MS) {
+			// Fermarsi qui e dire quanto serviva vale piu' che spendere il
+			// residuo in una navigazione che si tronchera' comunque.
+			const needed = browserStartMs + NAVIGATION_MIN_MS + RESPONSE_RESERVE_MS + TIER0_TIMEOUT_MS;
+			const error = new Error(`STARTUP_ATE_BUDGET:avvio ${browserStartMs}ms`);
+			error.evidence = {
+				browserStartMs,
+				navigationTimeoutMs,
+				suggestedBudgetMs: Math.ceil(needed / 1000) * 1000,
+			};
+			throw error;
+		}
+
 		const page = await browser.newPage();
 		await page.setViewport({ width: 1920, height: 1080 });
 
@@ -426,6 +459,12 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, navigationTimeou
 				pageTitle: inspection.title,
 				navigationTimedOut,
 				navigationTimeoutMs,
+				browserStartMs,
+				// Quanto sarebbe servito per non troncare: un numero osservato,
+				// non una stima, ed e' cio' che si mette in configurazione.
+				suggestedBudgetMs: navigationTimedOut
+					? Math.ceil((TIER0_TIMEOUT_MS + browserStartMs + navigationTimeoutMs * 2 + RESPONSE_RESERVE_MS) / 1000) * 1000
+					: null,
 			};
 			throw error;
 		}
@@ -437,6 +476,7 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, navigationTimeou
 			htmlBytes: inspection.bytes,
 			pageTitle: inspection.title,
 			navigationTimedOut,
+			browserStartMs,
 		};
 
 		await browser.close();
@@ -463,6 +503,7 @@ function isRetryable(error) {
 	return (
 		error.message.includes('CAPTCHA_DETECTED') ||
 		error.message.includes('EMPTY_PAGE') ||
+		error.message.includes('STARTUP_ATE_BUDGET') ||
 		error.message.includes('net::ERR_') ||
 		error.message.includes('Protocol error') ||
 		error.message.includes('Navigation timeout') ||
@@ -506,9 +547,23 @@ async function scrapeProduct(url, options = {}) {
 	let tier0Skipped = null;
 	let antiBotSuspected = false;
 	let evidence = null;
+	// Il tier a cui si e' effettivamente arrivati. Va tracciato mentre accade:
+	// dedurlo a valle dai campi dell'errore ha gia' prodotto una diagnostica
+	// che dichiarava «tier 0» su tentativi in cui il browser era partito.
+	let tierReached = 0;
 
 	// --- Tier 0 ---
-	if (allowHttp) {
+	//
+	// La ricetta del dominio dice gia' con quale trasporto quel sito si legge.
+	// Su un dominio che rifiuta le richieste senza browser la GET e' tempo
+	// tolto al browser - in produzione settecento millisecondi su novemila, per
+	// riprendersi lo stesso 403 di ogni volta - e il campo esisteva apposta.
+	const recipeWantsBrowser = recipe?.transport === 'browser';
+	if (recipeWantsBrowser && allowBrowser) {
+		console.log('[Scraper] La ricetta del dominio chiede il browser: salto il tier 0');
+	}
+
+	if (allowHttp && !(recipeWantsBrowser && allowBrowser)) {
 		const timeoutMs = Math.min(TIER0_TIMEOUT_MS, Math.max(remaining(), 0));
 		if (timeoutMs > 0) {
 			try {
@@ -537,7 +592,7 @@ async function scrapeProduct(url, options = {}) {
 
 	// --- Tier 1 ---
 	if (!allowBrowser) {
-		return finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, evidence, reason: 'browser_non_consentito' });
+		return finish(best, { url, startedAt, tierReached, tier0Skipped, antiBotSuspected, evidence, reason: 'browser_non_consentito' });
 	}
 
 	let lastError = null;
@@ -545,14 +600,14 @@ async function scrapeProduct(url, options = {}) {
 	for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
 		if (remaining() < BROWSER_MIN_MS) {
 			console.warn(`[Scraper] Budget insufficiente per il browser (${remaining()}ms < ${BROWSER_MIN_MS}ms)`);
-			return finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, evidence, reason: 'budget_esaurito', lastError });
+			return finish(best, { url, startedAt, tierReached, tier0Skipped, antiBotSuspected, evidence, reason: 'budget_esaurito', lastError });
 		}
 
 		try {
-			// Alla navigazione si lascia il residuo meno il margine di avvio e
-			// chiusura, mai piu' del budget stesso.
-			const navigationTimeoutMs = Math.max(remaining() - 3000, 2000);
-			const data = await runTier1(url, { ...context, attempt, navigationTimeoutMs });
+			tierReached = 1;
+			// Si passa la scadenza, non un timeout: quanto tempo resti davvero
+			// alla navigazione si sa solo dopo aver avviato il browser.
+			const data = await runTier1(url, { ...context, attempt, deadline });
 			return withDebug(data, { url, tier: 1, attempt: attempt + 1, startedAt, tier0Skipped, evidence });
 		} catch (error) {
 			lastError = error;
@@ -575,7 +630,7 @@ async function scrapeProduct(url, options = {}) {
 	}
 
 	return finish(best, {
-		url, startedAt, tier0Skipped, antiBotSuspected, evidence,
+		url, startedAt, tierReached, tier0Skipped, antiBotSuspected, evidence,
 		reason: describeFailure(lastError),
 		lastError,
 	});
@@ -590,6 +645,7 @@ async function scrapeProduct(url, options = {}) {
  */
 function describeFailure(error) {
 	if (!error) return 'browser_fallito';
+	if (error.message.includes('STARTUP_ATE_BUDGET')) return 'budget_speso_nell_avvio';
 	if (error.message.includes('EMPTY_PAGE:')) return error.message.split('EMPTY_PAGE:')[1].split(':')[0];
 	if (error.message.includes('CAPTCHA_DETECTED')) return 'pagina_di_sfida';
 	if (error.name === 'TimeoutError' || error.message.includes('Navigation timeout')) return 'navigazione_troncata';
@@ -604,7 +660,7 @@ function describeFailure(error) {
  * c'e' nulla si lancia, perche' un risultato vuoto sarebbe indistinguibile da
  * una pagina senza prezzo.
  */
-function finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, evidence, reason, lastError }) {
+function finish(best, { url, startedAt, tierReached = 0, tier0Skipped, antiBotSuspected, evidence, reason, lastError }) {
 	if (best) {
 		return withDebug(best.data, { url, tier: best.tier, attempt: 1, startedAt, tier0Skipped, evidence, degraded: reason });
 	}
@@ -613,9 +669,14 @@ function finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, evidence
 	const error = new Error(`${BUDGET_EXCEEDED}${detail}`);
 	error.code = BUDGET_EXCEEDED;
 	error.reason = reason;
+	error.tier = tierReached;
 	error.antiBotSuspected = antiBotSuspected;
 	error.tier0Skipped = tier0Skipped;
-	error.evidence = evidence;
+	// Anche un tentativo fallito ha una durata, ed e' il numero da cui si
+	// capisce se il budget e' bastato: ometterlo dagli errori significava
+	// perderlo esattamente dove serviva.
+	error.totalMs = Date.now() - startedAt;
+	error.evidence = { ...(evidence || {}), ...(lastError?.evidence || {}) };
 	throw error;
 }
 

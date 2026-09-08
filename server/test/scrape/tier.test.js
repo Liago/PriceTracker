@@ -200,3 +200,71 @@ describe('browserReachability - i tre gradi, non due', () => {
 		expect(browserReachability().level).toBe('condizionato');
 	});
 });
+
+/**
+ * Il transport della ricetta esisteva gia' nello schema e non veniva letto.
+ *
+ * Su un dominio che rifiuta le richieste senza browser, la GET e' tempo tolto
+ * al browser per riprendersi lo stesso 403 di ogni volta: in produzione
+ * settecento millisecondi su novemila di budget.
+ */
+describe('scrapeProduct - la ricetta dice con quale trasporto si legge', () => {
+	it('con transport "browser" il tier 0 non viene nemmeno tentato', async () => {
+		let tentato = false;
+		const impl = async () => { tentato = true; return { ok: false, reason: 'x', durationMs: 1 }; };
+
+		await expect(scrapeProduct(BACKMARKET_URL, {
+			fetchHtmlImpl: impl,
+			recipe: { transport: 'browser', fields: {} },
+			budgetMs: 1200, // troppo poco per il browser: fallisce subito
+		})).rejects.toMatchObject({ code: BUDGET_EXCEEDED });
+
+		expect(tentato).toBe(false);
+	});
+
+	it('ma se il browser non e’ disponibile il tier 0 si tenta comunque', async () => {
+		// Meglio una lettura HTTP incerta che nessuna lettura: il transport e'
+		// un'indicazione di costo, non un divieto.
+		const data = await scrapeProduct(BACKMARKET_URL, {
+			fetchHtmlImpl: servesHtml(fixture('backmarket', 'product-in-stock.html')),
+			recipe: { transport: 'browser', fields: {} },
+			allowBrowser: false,
+		});
+
+		expect(data.priceValue).toBeGreaterThan(0);
+		expect(data.debug.tier).toBe(0);
+	});
+
+	it('con transport "http" il tier 0 resta la prima scelta', async () => {
+		const data = await scrapeProduct(BACKMARKET_URL, {
+			fetchHtmlImpl: servesHtml(fixture('backmarket', 'product-in-stock.html')),
+			recipe: { transport: 'http', fields: {} },
+			allowBrowser: false,
+		});
+
+		expect(data.debug.tier).toBe(0);
+	});
+});
+
+describe('scrapeProduct - l’errore dice a che tier si e’ arrivati', () => {
+	it('il tier e’ tracciato, non dedotto dai campi presenti', async () => {
+		// Con budget minimo il browser non parte: il tier resta 0, e stavolta
+		// perche' e' vero, non perche' mancava l'HTML da cui dedurlo.
+		const promise = scrapeProduct(BACKMARKET_URL, {
+			fetchHtmlImpl: refuses('bloccato_dal_sito', true),
+			budgetMs: 1100,
+		});
+
+		await expect(promise).rejects.toMatchObject({ tier: 0, reason: 'budget_esaurito' });
+	});
+
+	it('anche un tentativo fallito riporta la propria durata', async () => {
+		try {
+			await scrapeProduct(BACKMARKET_URL, { fetchHtmlImpl: refuses('timeout'), budgetMs: 1100 });
+			throw new Error('doveva fallire');
+		} catch (error) {
+			expect(error.totalMs).toBeGreaterThanOrEqual(0);
+			expect(error.totalMs).toBeLessThan(3000);
+		}
+	});
+});

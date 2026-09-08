@@ -87,6 +87,10 @@ const FAILURES = Object.freeze({
 		status: 504,
 		message: 'La pagina ha impiegato troppo tempo a rispondere',
 	},
+	budget_speso_nell_avvio: {
+		status: 504,
+		message: "L'avvio del browser ha consumato il tempo disponibile prima di poter caricare la pagina",
+	},
 	nessun_candidato: {
 		status: 502,
 		message: 'Il sito ha risposto, ma con una pagina vuota',
@@ -121,7 +125,10 @@ function respondIncomplete(res, { scraped = null, error = null }) {
 	const attempt = scraped ? describeAttempt(scraped) : describeError(error);
 	const failure = classifyFailure(attempt.reason, attempt.antiBotSuspected);
 
-	console.warn(`[API] Lettura incompleta (${attempt.reason}): tier ${attempt.tier}, ${attempt.htmlBytes} byte in ${attempt.totalMs}ms`);
+	console.warn(
+		`[API] Lettura incompleta (${attempt.reason}): tier ${attempt.tier}, ${attempt.htmlBytes} byte in ${attempt.totalMs}ms`
+		+ (attempt.suggestedBudgetMs ? ` - servirebbe SCRAPE_REQUEST_BUDGET_MS=${attempt.suggestedBudgetMs}` : ''),
+	);
 
 	return res.status(failure.status).json({
 		error: failure.message,
@@ -131,21 +138,34 @@ function respondIncomplete(res, { scraped = null, error = null }) {
 	});
 }
 
-/** La diagnostica di un tentativo che si e' concluso con un'eccezione. */
+/**
+ * La diagnostica di un tentativo che si e' concluso con un'eccezione.
+ *
+ * Il tier arriva dal motore, che lo traccia mentre accade. Dedurlo qui - come
+ * faceva la prima versione, guardando se c'erano byte di HTML - produceva
+ * diagnostiche che dichiaravano «tier 0» su tentativi in cui il browser era
+ * partito e aveva perfino riconosciuto una sfida: la cosa peggiore che possa
+ * fare un campo diagnostico, cioe' mentire con sicurezza.
+ */
 function describeError(error) {
+	const evidence = error?.evidence || {};
 	return {
-		tier: error?.evidence?.htmlBytes != null ? 1 : 0,
-		usedBrowser: Boolean(error?.evidence?.navigationTimedOut !== undefined),
+		tier: error?.tier ?? 0,
+		usedBrowser: (error?.tier ?? 0) === 1,
 		reason: error?.reason || null,
 		tier0Skipped: error?.tier0Skipped || null,
 		antiBotSuspected: Boolean(error?.antiBotSuspected),
-		htmlBytes: error?.evidence?.htmlBytes ?? null,
-		pageTitle: error?.evidence?.pageTitle || null,
-		httpStatus: error?.evidence?.httpStatus ?? null,
-		navigationTimedOut: error?.evidence?.navigationTimedOut ?? null,
-		navigationTimeoutMs: error?.evidence?.navigationTimeoutMs ?? null,
+		htmlBytes: evidence.htmlBytes ?? null,
+		pageTitle: evidence.pageTitle || null,
+		httpStatus: evidence.httpStatus ?? null,
+		navigationTimedOut: evidence.navigationTimedOut ?? null,
+		navigationTimeoutMs: evidence.navigationTimeoutMs ?? null,
+		browserStartMs: evidence.browserStartMs ?? null,
+		// Quando il motore sa quanto budget gli sarebbe servito, lo dice: e' un
+		// numero osservato, ed e' esattamente cio' che va in configurazione.
+		suggestedBudgetMs: evidence.suggestedBudgetMs ?? null,
 		extractors: null,
-		totalMs: null,
+		totalMs: error?.totalMs ?? null,
 	};
 }
 
