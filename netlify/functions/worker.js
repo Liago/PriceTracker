@@ -79,8 +79,13 @@ module.exports.handler = async () => {
 				const recipe = await recipes.getActiveRecipe(product.url);
 				let lastResult = null;
 				const scrape = async (url) => {
+					// Il budget del singolo controllo e' cio' che resta al worker:
+					// senza, il motore userebbe il proprio default e potrebbe
+					// sforare il lotto invece di lasciare il job al prossimo giro.
 					lastResult = await scrapeProduct(url, {
-						recipe, lastKnownPrice: product.current_price ?? null,
+						recipe,
+						lastKnownPrice: product.current_price ?? null,
+						budgetMs: Math.max(TIME_BUDGET_MS - RESERVE_MS - (Date.now() - startedAt), 2000),
 					});
 					return lastResult;
 				};

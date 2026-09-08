@@ -18,6 +18,11 @@ ordine, e di cosa guardare.
 | `SCRAPE_WORKER_BUDGET_MS` | opzionale, default 20000 |
 | `SCRAPE_FAST_PATH_THRESHOLD` | opzionale, default 0.85 |
 | `SCRAPE_RESPECT_ROBOTS` | opzionale, default attivo |
+| `SCRAPE_REQUEST_BUDGET_MS` | opzionale, default 9000. Deve restare **sotto** il timeout delle function sincrone di Netlify (10s), altrimenti al posto della risposta arriva un 504 del proxy |
+| `SCRAPE_TIER0` | opzionale, `on` per default. `off` disattiva la GET e torna a usare sempre il browser |
+| `SCRAPE_TIER0_THRESHOLD` | opzionale, default 0.6. Sotto questa confidenza il tier 0 non basta e si sale al browser |
+| `SCRAPE_TIER0_TIMEOUT_MS` | opzionale, default 6000 |
+| `SCRAPE_BROWSER_MIN_MS` | opzionale, default 8000. Tempo residuo sotto il quale Chromium non viene nemmeno avviato |
 
 **Migrazioni.** Vanno applicate *prima* del deploy del codice: il codice nuovo
 usa tabelle che le migrazioni creano.
@@ -49,6 +54,10 @@ select count(*) from price_observations;
 1. **Aggiungi un prodotto da uno store già supportato** (MediaWorld, BackMarket).
    Deve funzionare come prima. Nei log cerca `usedFastPath: true`: significa che
    la ricetta seminata ha funzionato e la scoperta completa è stata saltata.
+   Cerca anche `[Scraper] Tier 0: confidenza`: su questi store la pagina va
+   letta con una GET, senza avviare Chromium. Se vedi `Tier 0 sotto soglia`
+   seguito dall'avvio del browser su uno store con dati strutturati, è il
+   segnale che la pagina è cambiata.
 2. **Aggiungi un prodotto da uno shop mai visto** — è il punto dell'intero
    refactor. Uno shop italiano su Shopify o WooCommerce è il caso migliore.
    Se il prezzo non è leggibile il prodotto **non viene creato**, con un
@@ -68,6 +77,9 @@ Tre prefissi stabili, tutti grep-abili dai log di Netlify:
 
 - `[Metric]` — una riga JSON per controllo: dominio, esito, confidenza,
   sorgente, se ha usato il fast path, durata. È la misura che conta.
+- `[Scraper] Tier 0` — la pagina è stata letta senza browser. La quota di
+  controlli che si fermano qui è la misura del costo: ogni riga che manca è
+  un avvio di Chromium.
 - `[Dispatcher]` — quanti job accodati, quanti non dovuti, quanti in attesa.
 - `[Worker …]` — quanti job elaborati e quanti restano.
 
@@ -84,6 +96,9 @@ accettazione per dominio? Si ricava contando le righe `[Metric]` con
 | Osservazioni respinte in massa | `select reject_reason, count(*) from price_observations where not accepted group by 1` | la soglia di confidenza è troppo alta per il traffico reale |
 | Coda che cresce senza scendere | `select status, count(*) from scrape_jobs group by 1` | i worker superano il budget: abbassa `SCRAPE_WORKER_BATCH` |
 | Worker che non partono | log Netlify | manca `SUPABASE_SERVICE_ROLE_KEY` |
+| 504 con una pagina HTML («Inactivity Timeout») al posto di JSON | log Netlify, durata della function | la richiesta ha superato il timeout della piattaforma: `SCRAPE_REQUEST_BUDGET_MS` è troppo alto per il limite del tuo piano |
+| 504 JSON con `code: SCRAPE_BUDGET_EXCEEDED` | il campo `reason` nella risposta | è il motore che si ferma per tempo, non il proxy che tronca. `budget_esaurito`: la pagina è lenta; `antiBotSuspected: true`: il sito rifiuta la lettura automatica |
+| Molti `Tier 0 sotto soglia` su un dominio | `[Scraper]` nei log | la ricetta di quel dominio non regge sull'HTML statico: il prezzo arriva da JavaScript |
 
 ## 6. Come tornare indietro
 
@@ -94,6 +109,9 @@ previsto:
   funzioni schedulate `dispatcher` e `worker` dalla UI di Netlify.
 - **Disattivare il fast path** e forzare sempre la scoperta completa:
   `SCRAPE_FAST_PATH_THRESHOLD=2` (nessuna confidenza raggiunge 2).
+- **Disattivare il tier 0** e tornare al browser per ogni controllo:
+  `SCRAPE_TIER0=off`. Da usare solo per i worker: sulle richieste sincrone
+  il browser non ci sta nel budget di Netlify.
 - **Sospendere una ricetta sbagliata** senza deploy:
   ```sql
   update scrape_recipes set status = 'deprecated' where domain = 'shop-problematico.it';
@@ -110,10 +128,12 @@ parallelo alle osservazioni.
 
 ## 7. Cosa resta da fare dopo
 
-- **Tier 0 HTTP** (difetto D12): oggi ogni controllo avvia Chromium. Il motore
-  lavora già sull'HTML e non sul `page` di Puppeteer, quindi scaricare la
-  pagina senza browser è abilitato dall'architettura ma non implementato. È il
-  prossimo guadagno di costo, stimato sul 70% dei controlli.
+- ~~**Tier 0 HTTP** (difetto D12)~~ — fatto. Il motore prova prima una GET e
+  avvia Chromium solo quando l'HTML statico non basta. Non era solo un
+  risparmio: dentro il budget di dieci secondi di una function sincrona il
+  browser non ci stava, e l'aggiunta di un prodotto finiva sistematicamente in
+  504. Resta da **misurare** la quota reale di controlli che si fermano al
+  tier 0, contando le righe `[Scraper] Tier 0: confidenza` sul totale.
 - Rimuovere il dual write su `price_history` quando il client userà
   `price_history_v`.
 - Valutare l'integrazione LLM per la generazione delle ricette (sezione 19 del

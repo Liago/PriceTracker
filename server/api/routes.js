@@ -15,13 +15,48 @@
 
 const { jsonBody } = require('./jsonBody');
 const { checkUrl } = require('../scrape/policy/urlPolicy');
-const { scrapeProduct } = require('../services/scraper');
+const { scrapeProduct, BUDGET_EXCEEDED, DEFAULT_BUDGET_MS } = require('../services/scraper');
 const { normalizeScrapeResult } = require('../scrape/normalizeResult');
 const { checkProduct } = require('../services/productChecker');
 const { createTrackingRepository } = require('../services/trackingRepository');
 const { createRecipeStore } = require('../scrape/recipe/store');
 const { learnRecipe } = require('../scrape/recipe/learner');
 const { describeOffer } = require('../scrape/normalize/offer');
+
+/**
+ * Quanto tempo resta allo scrape.
+ *
+ * Il budget non appartiene al motore ma alla richiesta: e' il tempo che la
+ * piattaforma concede prima di troncare la connessione. Va scalato di cio' che
+ * e' gia' stato speso in DNS, autenticazione e lettura della ricetta,
+ * altrimenti il motore crede di avere tutto il budget quando ne ha meta'.
+ *
+ * @param {number} startedAt - Date.now() a inizio richiesta
+ * @returns {number} millisecondi, mai negativi
+ */
+function remainingBudget(startedAt) {
+	return Math.max(DEFAULT_BUDGET_MS - (Date.now() - startedAt), 1000);
+}
+
+/**
+ * Risponde a un'analisi che non e' arrivata in fondo nel tempo concesso.
+ *
+ * E' un 504 nostro, con un motivo leggibile. La sola alternativa e' lasciare
+ * che sia il proxy a chiudere la connessione, e in quel caso al client arriva
+ * una pagina HTML di errore al posto di JSON: nessun codice, nessun motivo,
+ * niente da mostrare all'utente.
+ */
+function respondBudgetExceeded(res, error) {
+	console.warn(`[API] Budget esaurito (${error.reason}), tier 0: ${error.tier0Skipped || 'ok'}`);
+	return res.status(504).json({
+		error: error.antiBotSuspected
+			? 'Il sito ha rifiutato la lettura automatica'
+			: 'La pagina ha impiegato troppo tempo a rispondere',
+		code: BUDGET_EXCEEDED,
+		reason: error.reason,
+		antiBotSuspected: Boolean(error.antiBotSuspected),
+	});
+}
 
 /**
  * Estrae l'utente dal token di sessione Supabase.
@@ -54,15 +89,17 @@ function registerRoutes({ getClient }) {
 		 * Analizza un URL senza salvarlo. Serve all'anteprima nella UI.
 		 */
 		router.post('/scrape', async (req, res) => {
+			const startedAt = Date.now();
 			const { url } = req.body || {};
 			try {
 				const policy = await checkUrl(url);
 				if (!policy.allowed) {
 					return res.status(400).json({ error: `URL non ammesso: ${policy.reason}`, reason: policy.reason });
 				}
-				const data = await scrapeProduct(policy.url);
+				const data = await scrapeProduct(policy.url, { budgetMs: remainingBudget(startedAt) });
 				res.json(normalizeScrapeResult(data, policy.url));
 			} catch (error) {
+				if (error.code === BUDGET_EXCEEDED) return respondBudgetExceeded(res, error);
 				console.error('[API] Errore di scrape:', error.message);
 				res.status(500).json({ error: 'Analisi della pagina fallita' });
 			}
@@ -77,6 +114,7 @@ function registerRoutes({ getClient }) {
 			if (!user) return res.status(401).json({ error: authError });
 
 			const { url, targetPrice = null, monitoringUntil = null } = req.body || {};
+			const startedAt = Date.now();
 
 			try {
 				const policy = await checkUrl(url);
@@ -86,7 +124,7 @@ function registerRoutes({ getClient }) {
 
 				const recipes = createRecipeStore({ client });
 				const recipe = await recipes.getActiveRecipe(policy.url);
-				const scraped = await scrapeProduct(policy.url, { recipe });
+				const scraped = await scrapeProduct(policy.url, { recipe, budgetMs: remainingBudget(startedAt) });
 				const data = normalizeScrapeResult(scraped, policy.url);
 
 				// Nessun prezzo leggibile: il prodotto non viene creato. Una storia
@@ -165,6 +203,7 @@ function registerRoutes({ getClient }) {
 
 				res.status(201).json({ product, confidence: scraped.confidence ?? null });
 			} catch (error) {
+				if (error.code === BUDGET_EXCEEDED) return respondBudgetExceeded(res, error);
 				console.error('[API] Aggiunta prodotto fallita:', error.message);
 				res.status(500).json({ error: 'Aggiunta del prodotto fallita' });
 			}
@@ -175,6 +214,7 @@ function registerRoutes({ getClient }) {
 		 * controllo automatico.
 		 */
 		router.post('/products/:id/refresh', async (req, res) => {
+			const startedAt = Date.now();
 			const client = getClient();
 			const { user } = await authenticate(req, client);
 			if (!user) return res.status(401).json({ error: 'sessione non valida' });
@@ -191,7 +231,11 @@ function registerRoutes({ getClient }) {
 
 				let lastResult = null;
 				const scrape = async (url) => {
-					lastResult = await scrapeProduct(url, { recipe, lastKnownPrice: product.current_price });
+					lastResult = await scrapeProduct(url, {
+						recipe,
+						lastKnownPrice: product.current_price,
+						budgetMs: remainingBudget(startedAt),
+					});
 					return lastResult;
 				};
 
@@ -210,6 +254,7 @@ function registerRoutes({ getClient }) {
 					priceChanged: outcome.priceChanged,
 				});
 			} catch (error) {
+				if (error.code === BUDGET_EXCEEDED) return respondBudgetExceeded(res, error);
 				console.error('[API] Refresh fallito:', error.message);
 				res.status(500).json({ error: 'Aggiornamento fallito' });
 			}
