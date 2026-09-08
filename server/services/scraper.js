@@ -1,3 +1,28 @@
+/**
+ * Ottenere e interpretare una pagina prodotto, a tier.
+ *
+ * Il motore non ha piu' codice dedicato per nessuno store: il browser - o la
+ * GET - servono solo a OTTENERE l'HTML, e a leggerlo e' la pipeline generica
+ * guidata dalla ricetta del dominio.
+ *
+ * Due tier, in ordine di costo:
+ *
+ *   Tier 0 - una GET HTTP. Costa meno di un secondo e basta per ogni pagina
+ *            che espone JSON-LD, microdata o Open Graph, cioe' la grande
+ *            maggioranza degli shop e tutte le ricette seminate.
+ *   Tier 1 - Chromium. Serve alle pagine che il prezzo lo costruiscono in
+ *            JavaScript, e a quelle che rispondono 403 a chi non e' un browser.
+ *
+ * Il tier 1 non e' gratis e in produzione non e' nemmeno sempre possibile: una
+ * function sincrona di Netlify vive dieci secondi, e avviare Chromium ne costa
+ * gia' diversi. Da qui il budget: ogni chiamata riceve una scadenza e la
+ * rispetta, salendo di tier solo se resta tempo per arrivare in fondo. Quando
+ * il tempo non basta si restituisce il miglior risultato ottenuto, o si fallisce
+ * con un errore riconoscibile - non si lascia che sia il proxy a troncare la
+ * connessione, perche' quello produce un 504 con una pagina HTML al posto di
+ * una risposta, e nessuna informazione su cosa sia andato storto.
+ */
+
 const puppeteerCore = require('puppeteer-core');
 const { addExtra } = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
@@ -10,6 +35,7 @@ const { createProxyManagerFromEnv } = require('../utils/proxyManager');
 const { captchaDetector } = require('../utils/captchaDetector');
 const { resolveLocalExecutablePath } = require('../utils/browserPath');
 const { interpret } = require('../scrape');
+const { fetchHtml } = require('../scrape/fetchHtml');
 
 // Configuration
 const MAX_RETRIES = parseInt(process.env.SCRAPER_MAX_RETRIES || '3', 10);
@@ -17,6 +43,28 @@ const RETRY_DELAY_BASE = parseInt(process.env.SCRAPER_RETRY_DELAY || '1000', 10)
 
 // La soglia sotto la quale il fast path non basta e si passa alla scoperta.
 const FAST_PATH_THRESHOLD = parseFloat(process.env.SCRAPE_FAST_PATH_THRESHOLD || '0.85');
+
+// La soglia sotto la quale il risultato del tier 0 non basta e si sale al
+// browser. Piu' bassa del fast path: qui non si sta scegliendo fra due
+// strategie ma fra un risultato e nessun risultato.
+const TIER0_THRESHOLD = parseFloat(process.env.SCRAPE_TIER0_THRESHOLD || '0.6');
+
+// Quanto si concede alla GET prima di rinunciare e passare al browser.
+const TIER0_TIMEOUT_MS = parseInt(process.env.SCRAPE_TIER0_TIMEOUT_MS || '6000', 10);
+
+// Il tier 0 si disattiva con SCRAPE_TIER0=off, senza deploy.
+const TIER0_ENABLED = (process.env.SCRAPE_TIER0 || 'on').toLowerCase() !== 'off';
+
+// Budget di default di una singola chiamata. Sotto i dieci secondi delle
+// function sincrone di Netlify, con margine per la risposta.
+const DEFAULT_BUDGET_MS = parseInt(process.env.SCRAPE_REQUEST_BUDGET_MS || '9000', 10);
+
+// Sotto questo tempo residuo non ha senso avviare Chromium: si spenderebbe
+// tutto il budget nell'avvio, per poi essere troncati durante la navigazione.
+const BROWSER_MIN_MS = parseInt(process.env.SCRAPE_BROWSER_MIN_MS || '8000', 10);
+
+/** Errore riconoscibile: il budget e' finito prima di un risultato. */
+const BUDGET_EXCEEDED = 'SCRAPE_BUDGET_EXCEEDED';
 
 // Initialize proxy manager
 const proxyManager = createProxyManagerFromEnv();
@@ -95,20 +143,46 @@ async function createBrowser(proxy = null) {
 }
 
 /**
- * Scarica e interpreta una pagina prodotto, con retry.
+ * Tier 0: la pagina via GET, interpretata dalla pipeline.
  *
  * @param {string} url
- * @param {object} [options]
- * @param {object|null} [options.recipe] - ricetta attiva del dominio
- * @param {number|null} [options.lastKnownPrice] - premia la coerenza storica
- * @param {number} [options.attempt] - uso interno
- * @returns {Promise<Object>}
+ * @param {object} context - { recipe, lastKnownPrice, timeoutMs, fetchHtmlImpl }
+ * @returns {Promise<{data: object|null, skipped: string|null, antiBotSuspected: boolean, durationMs: number}>}
  */
-async function scrapeProduct(url, options = {}) {
-	// Compatibilita': la firma precedente era scrapeProduct(url, attempt).
-	const normalized = typeof options === 'number' ? { attempt: options } : (options || {});
-	const { recipe = null, lastKnownPrice = null, attempt = 0 } = normalized;
+async function runTier0(url, { recipe, lastKnownPrice, timeoutMs, fetchHtmlImpl = fetchHtml }) {
+	const fetched = await fetchHtmlImpl(url, { timeoutMs });
 
+	if (!fetched.ok) {
+		console.log(`[Scraper] Tier 0 non applicabile (${fetched.reason}) in ${fetched.durationMs}ms`);
+		return {
+			data: null,
+			skipped: fetched.reason,
+			antiBotSuspected: Boolean(fetched.antiBotSuspected),
+			durationMs: fetched.durationMs,
+		};
+	}
+
+	const data = interpret(fetched.html, {
+		url,
+		recipe,
+		lastKnownPrice,
+		antiBotDetected: false,
+		fastPathThreshold: FAST_PATH_THRESHOLD,
+	});
+
+	console.log(`[Scraper] Tier 0: confidenza ${data.confidence} in ${fetched.durationMs}ms`);
+
+	return { data, skipped: null, antiBotSuspected: false, durationMs: fetched.durationMs };
+}
+
+/**
+ * Tier 1: la pagina con Chromium, un solo tentativo.
+ *
+ * @param {string} url
+ * @param {object} context
+ * @returns {Promise<object>} risultato interpretato
+ */
+async function runTier1(url, { recipe, lastKnownPrice, attempt, navigationTimeoutMs }) {
 	let browser = null;
 	const proxy = proxyManager.hasProxies() ? proxyManager.getRandomProxy() : null;
 
@@ -161,11 +235,13 @@ async function scrapeProduct(url, options = {}) {
 			domain: domain
 		});
 
-		// Navigate with timeout handling
+		// Navigate with timeout handling. Il timeout e' quello che resta del
+		// budget, non un valore fisso: un'attesa di trenta secondi dentro una
+		// function che ne vive dieci non e' un'attesa, e' un 504.
 		try {
 			await page.goto(url, {
 				waitUntil: 'domcontentloaded',
-				timeout: 30000
+				timeout: navigationTimeoutMs,
 			});
 		} catch (navError) {
 			if (navError.name !== 'TimeoutError') throw navError;
@@ -202,26 +278,14 @@ async function scrapeProduct(url, options = {}) {
 
 		if (!data.title) data.title = await page.title();
 
-		data.debug = {
-			url,
-			source: data.fields?.price?.source ?? null,
-			confidence: data.confidence,
-			usedFastPath: data.usedFastPath,
-			recipeId: data.recipeId,
-			foundPrice: data.price !== null,
-			attempt: attempt + 1,
-			userAgent: userAgent.substring(0, 50),
-			proxyUsed: !!proxy,
-			captchaDetected: captchaResult.detected,
-		};
+		data.captchaDetected = captchaResult.detected;
+		data.proxyUsed = !!proxy;
+		data.userAgent = userAgent;
 
 		await browser.close();
 		return data;
 
 	} catch (error) {
-		console.error(`[Scraper] Error on attempt ${attempt + 1}:`, error.message);
-
-		// Close browser if open
 		if (browser) {
 			try {
 				await browser.close();
@@ -229,25 +293,174 @@ async function scrapeProduct(url, options = {}) {
 				// Ignore close errors
 			}
 		}
-
-		// Check if we should retry
-		const shouldRetry = attempt < MAX_RETRIES - 1 && (
-			error.message.includes('CAPTCHA_DETECTED') ||
-			error.message.includes('net::ERR_') ||
-			error.message.includes('Protocol error') ||
-			error.message.includes('Navigation timeout') ||
-			error.name === 'TimeoutError'
-		);
-
-		if (shouldRetry) {
-			const delay = getBackoffDelay(attempt);
-			console.log(`[Scraper] Retrying in ${Math.round(delay / 1000)}s...`);
-			await sleep(delay);
-			return scrapeProduct(url, { recipe, lastKnownPrice, attempt: attempt + 1 });
+		if (proxy && !error.message.includes('CAPTCHA_DETECTED')) {
+			// Un errore di rete su un proxy e' un'informazione sul proxy.
+			if (error.message.includes('net::ERR_')) proxyManager.markCurrentAsFailed();
 		}
-
 		throw error;
 	}
+}
+
+/** L'errore giustifica un altro tentativo con browser? */
+function isRetryable(error) {
+	return (
+		error.message.includes('CAPTCHA_DETECTED') ||
+		error.message.includes('net::ERR_') ||
+		error.message.includes('Protocol error') ||
+		error.message.includes('Navigation timeout') ||
+		error.name === 'TimeoutError'
+	);
+}
+
+/**
+ * Scarica e interpreta una pagina prodotto.
+ *
+ * @param {string} url
+ * @param {object|number} [options] - un numero e' la vecchia firma (attempt)
+ * @param {object|null} [options.recipe] - ricetta attiva del dominio
+ * @param {number|null} [options.lastKnownPrice] - premia la coerenza storica
+ * @param {number} [options.budgetMs] - tempo totale concesso alla chiamata
+ * @param {boolean} [options.allowBrowser=true] - false per restare al tier 0
+ * @param {boolean} [options.allowHttp] - false per saltare il tier 0
+ * @param {function} [options.fetchHtmlImpl] - iniettabile per i test
+ * @returns {Promise<Object>}
+ */
+async function scrapeProduct(url, options = {}) {
+	// Compatibilita': la firma precedente era scrapeProduct(url, attempt).
+	const normalized = typeof options === 'number' ? { attempt: options } : (options || {});
+	const {
+		recipe = null,
+		lastKnownPrice = null,
+		budgetMs = DEFAULT_BUDGET_MS,
+		allowBrowser = true,
+		allowHttp = TIER0_ENABLED,
+		fetchHtmlImpl = fetchHtml,
+	} = normalized;
+
+	const startedAt = Date.now();
+	const deadline = startedAt + budgetMs;
+	const remaining = () => deadline - Date.now();
+
+	const context = { recipe, lastKnownPrice };
+
+	/** Il miglior risultato ottenuto finora, da restituire se il budget finisce. */
+	let best = null;
+	let tier0Skipped = null;
+	let antiBotSuspected = false;
+
+	// --- Tier 0 ---
+	if (allowHttp) {
+		const timeoutMs = Math.min(TIER0_TIMEOUT_MS, Math.max(remaining(), 0));
+		if (timeoutMs > 0) {
+			try {
+				const tier0 = await runTier0(url, { ...context, timeoutMs, fetchHtmlImpl });
+				tier0Skipped = tier0.skipped;
+				antiBotSuspected = tier0.antiBotSuspected;
+
+				if (tier0.data) {
+					best = { data: tier0.data, tier: 0 };
+					// Abbastanza affidabile: il browser non serve, ed e' il caso
+					// normale per ogni pagina con dati strutturati.
+					if (tier0.data.confidence >= TIER0_THRESHOLD && tier0.data.priceValue !== null) {
+						return withDebug(tier0.data, { url, tier: 0, attempt: 1, startedAt, tier0Skipped: null });
+					}
+					console.log(`[Scraper] Tier 0 sotto soglia (${tier0.data.confidence} < ${TIER0_THRESHOLD}): salgo al browser`);
+				}
+			} catch (error) {
+				// Il tier 0 non deve mai far fallire la chiamata: al massimo non
+				// produce nulla e si sale.
+				console.warn(`[Scraper] Tier 0 fallito: ${error.message}`);
+				tier0Skipped = 'errore_interno';
+			}
+		}
+	}
+
+	// --- Tier 1 ---
+	if (!allowBrowser) {
+		return finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, reason: 'browser_non_consentito' });
+	}
+
+	let lastError = null;
+
+	for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+		if (remaining() < BROWSER_MIN_MS) {
+			console.warn(`[Scraper] Budget insufficiente per il browser (${remaining()}ms < ${BROWSER_MIN_MS}ms)`);
+			return finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, reason: 'budget_esaurito', lastError });
+		}
+
+		try {
+			// Alla navigazione si lascia il residuo meno il margine di avvio e
+			// chiusura, mai piu' del budget stesso.
+			const navigationTimeoutMs = Math.max(remaining() - 3000, 2000);
+			const data = await runTier1(url, { ...context, attempt, navigationTimeoutMs });
+			return withDebug(data, { url, tier: 1, attempt: attempt + 1, startedAt, tier0Skipped });
+		} catch (error) {
+			lastError = error;
+			console.error(`[Scraper] Error on attempt ${attempt + 1}:`, error.message);
+
+			if (!isRetryable(error) || attempt >= MAX_RETRIES - 1) break;
+
+			const delay = getBackoffDelay(attempt);
+			if (remaining() - delay < BROWSER_MIN_MS) {
+				console.warn('[Scraper] Nessun tempo per un altro tentativo: mi fermo qui');
+				break;
+			}
+
+			console.log(`[Scraper] Retrying in ${Math.round(delay / 1000)}s...`);
+			await sleep(delay);
+		}
+	}
+
+	return finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, reason: 'browser_fallito', lastError });
+}
+
+/**
+ * Conclude quando il tier 1 non ha prodotto nulla.
+ *
+ * Se il tier 0 aveva un risultato lo si restituisce, anche a bassa confidenza:
+ * a decidere se e' abbastanza e' chi chiama, che conosce le sue soglie. Se non
+ * c'e' nulla si lancia, perche' un risultato vuoto sarebbe indistinguibile da
+ * una pagina senza prezzo.
+ */
+function finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, reason, lastError }) {
+	if (best) {
+		return withDebug(best.data, { url, tier: best.tier, attempt: 1, startedAt, tier0Skipped, degraded: reason });
+	}
+
+	const detail = lastError ? `: ${lastError.message}` : '';
+	const error = new Error(`${BUDGET_EXCEEDED}${detail}`);
+	error.code = BUDGET_EXCEEDED;
+	error.reason = reason;
+	error.antiBotSuspected = antiBotSuspected;
+	error.tier0Skipped = tier0Skipped;
+	throw error;
+}
+
+/** Attacca la diagnostica al risultato, nella forma che finisce in scrape_runs. */
+function withDebug(data, { url, tier, attempt, startedAt, tier0Skipped, degraded = null }) {
+	data.debug = {
+		url,
+		tier,
+		usedBrowser: tier === 1,
+		source: data.fields?.price?.source ?? null,
+		confidence: data.confidence,
+		usedFastPath: data.usedFastPath,
+		recipeId: data.recipeId,
+		foundPrice: data.price !== null,
+		attempt,
+		tier0Skipped,
+		degraded,
+		totalMs: Date.now() - startedAt,
+		userAgent: data.userAgent ? data.userAgent.substring(0, 50) : null,
+		proxyUsed: Boolean(data.proxyUsed),
+		captchaDetected: Boolean(data.captchaDetected),
+	};
+
+	delete data.userAgent;
+	delete data.proxyUsed;
+	delete data.captchaDetected;
+
+	return data;
 }
 
 /**
@@ -259,10 +472,14 @@ function getScraperStats() {
 		captcha: captchaDetector.getStats(),
 		proxy: proxyManager.getStats(),
 		userAgentCount: userAgentManager.getAllUserAgents().length,
+		tier0: { enabled: TIER0_ENABLED, threshold: TIER0_THRESHOLD, timeoutMs: TIER0_TIMEOUT_MS },
+		budgetMs: DEFAULT_BUDGET_MS,
 	};
 }
 
 module.exports = {
 	scrapeProduct,
 	getScraperStats,
+	BUDGET_EXCEEDED,
+	DEFAULT_BUDGET_MS,
 };
