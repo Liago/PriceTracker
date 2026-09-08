@@ -24,6 +24,16 @@ ordine, e di cosa guardare.
 | `SCRAPE_TIER0_TIMEOUT_MS` | opzionale, default 6000 |
 | `SCRAPE_BROWSER_MIN_MS` | opzionale, default 8000. Tempo residuo sotto il quale Chromium non viene nemmeno avviato |
 
+> **Il vincolo che decide tutto.** Perché il browser possa partire serve
+> `SCRAPE_REQUEST_BUDGET_MS >= SCRAPE_TIER0_TIMEOUT_MS + SCRAPE_BROWSER_MIN_MS`,
+> cioè almeno **14 secondi**. Con i default (9000) non ci sta: sulle richieste
+> sincrone esiste **solo il tier 0**, e ogni pagina che l'HTML statico non
+> risolve risponde `503 SCRAPE_INCOMPLETE`. Non è un guasto, è aritmetica — e
+> il motore lo dice da sé, con un avviso `[Scraper] ... il browser non parte
+> mai` al primo caricamento. Se la piattaforma concede più di 10 secondi, alza
+> il budget lasciando ~1s di margine per la risposta. Altrimenti quei controlli
+> vanno lasciati al worker, che di budget ne ha 20.
+
 **Migrazioni.** Vanno applicate *prima* del deploy del codice: il codice nuovo
 usa tabelle che le migrazioni creano.
 
@@ -62,10 +72,17 @@ select count(*) from price_observations;
    refactor. Uno shop italiano su Shopify o WooCommerce è il caso migliore.
    Se il prezzo non è leggibile il prodotto **non viene creato**, con un
    messaggio esplicito: è voluto, non un errore.
-3. **Refresh manuale** su un prodotto esistente. Se il prezzo letto non è
+3. **Se un'aggiunta fallisce, chiedi al motore perché.** Sia il 422 che il 503
+   portano un blocco `diagnostics`: `tier` raggiunto, `htmlBytes` ricevuti,
+   `pageTitle` letto e `extractors` con quanti candidati ha prodotto ciascuno
+   (`jsonld:0 microdata:0 meta:3 …`). Sono dati sul nostro tentativo, e dicono
+   in una riga se il problema è il sito, la pagina o la configurazione. Per
+   indagare senza salvare nulla c'è `POST /api/scrape`, che restituisce lo
+   stesso `debug` completo.
+4. **Refresh manuale** su un prodotto esistente. Se il prezzo letto non è
    attendibile vedrai «Aggiornato, ma il prezzo letto non è attendibile»: il
    prezzo precedente resta, ed è il comportamento corretto.
-4. **Segnala un prezzo sbagliato** con il pulsante nella pagina prodotto. Poi
+5. **Segnala un prezzo sbagliato** con il pulsante nella pagina prodotto. Poi
    verifica che la ricetta sia andata in quarantena:
    ```sql
    select domain, status from scrape_recipes where status = 'quarantined';
@@ -80,6 +97,9 @@ Tre prefissi stabili, tutti grep-abili dai log di Netlify:
 - `[Scraper] Tier 0` — la pagina è stata letta senza browser. La quota di
   controlli che si fermano qui è la misura del costo: ogni riga che manca è
   un avvio di Chromium.
+- `[Scraper] Tier 0: pagina di sfida` — il sito ha risposto con una verifica
+  di sicurezza (Cloudflare, DataDome, PerimeterX…) al posto della pagina. La
+  riga riporta il fornitore, il titolo ricevuto e i byte.
 - `[Dispatcher]` — quanti job accodati, quanti non dovuti, quanti in attesa.
 - `[Worker …]` — quanti job elaborati e quanti restano.
 
@@ -98,6 +118,8 @@ accettazione per dominio? Si ricava contando le righe `[Metric]` con
 | Worker che non partono | log Netlify | manca `SUPABASE_SERVICE_ROLE_KEY` |
 | 504 con una pagina HTML («Inactivity Timeout») al posto di JSON | log Netlify, durata della function | la richiesta ha superato il timeout della piattaforma: `SCRAPE_REQUEST_BUDGET_MS` è troppo alto per il limite del tuo piano |
 | 504 JSON con `code: SCRAPE_BUDGET_EXCEEDED` | il campo `reason` nella risposta | è il motore che si ferma per tempo, non il proxy che tronca. `budget_esaurito`: la pagina è lenta; `antiBotSuspected: true`: il sito rifiuta la lettura automatica |
+| 503 `SCRAPE_INCOMPLETE` | il blocco `diagnostics` nella risposta | la pagina non è stata letta fino in fondo. `tier0Skipped: "sfida_*"`: il sito ha risposto con una verifica di sicurezza; `degraded: "budget_esaurito"`: il browser non è partito (vedi il vincolo in §1) |
+| 422 `LOW_CONFIDENCE` con `diagnostics.htmlBytes` alto e `extractors` tutti a `:0` | `diagnostics.pageTitle` | la pagina è arrivata intera ma nessun estrattore ci ha trovato un prodotto: probabilmente non è una scheda prodotto, o è un listing |
 | Molti `Tier 0 sotto soglia` su un dominio | `[Scraper]` nei log | la ricetta di quel dominio non regge sull'HTML statico: il prezzo arriva da JavaScript |
 
 ## 6. Come tornare indietro
