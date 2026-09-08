@@ -36,6 +36,7 @@ const { captchaDetector } = require('../utils/captchaDetector');
 const { resolveLocalExecutablePath } = require('../utils/browserPath');
 const { interpret } = require('../scrape');
 const { fetchHtml } = require('../scrape/fetchHtml');
+const { detectInHtml } = require('../scrape/antiBot');
 
 // Configuration
 const MAX_RETRIES = parseInt(process.env.SCRAPER_MAX_RETRIES || '3', 10);
@@ -65,6 +66,32 @@ const BROWSER_MIN_MS = parseInt(process.env.SCRAPE_BROWSER_MIN_MS || '8000', 10)
 
 /** Errore riconoscibile: il budget e' finito prima di un risultato. */
 const BUDGET_EXCEEDED = 'SCRAPE_BUDGET_EXCEEDED';
+
+/**
+ * Il tier 1 e' raggiungibile con questa configurazione?
+ *
+ * E' aritmetica, non un'opinione: per avviare Chromium serve che, dopo la GET
+ * del tier 0, resti almeno BROWSER_MIN_MS. Se il budget totale non copre la
+ * somma, il browser non partira' MAI e ogni pagina che l'HTML statico non
+ * risolve finira' come lettura incompleta.
+ *
+ * Non e' necessariamente un errore - su una function sincrona di Netlify da
+ * dieci secondi e' semplicemente la realta', e il tier 0 e' l'unica strada -
+ * ma deve essere una scelta consapevole e non una sorpresa da diagnosticare
+ * a valle, in produzione, guardando i 503.
+ */
+function browserReachable() {
+	return DEFAULT_BUDGET_MS >= TIER0_TIMEOUT_MS + BROWSER_MIN_MS;
+}
+
+if (!browserReachable()) {
+	console.warn(
+		`[Scraper] Con SCRAPE_REQUEST_BUDGET_MS=${DEFAULT_BUDGET_MS} il browser non parte mai: `
+		+ `servirebbero almeno ${TIER0_TIMEOUT_MS + BROWSER_MIN_MS}ms (tier 0 ${TIER0_TIMEOUT_MS} + avvio ${BROWSER_MIN_MS}). `
+		+ 'Le pagine che il solo HTML non risolve daranno SCRAPE_INCOMPLETE. '
+		+ 'Alza il budget se la piattaforma lo consente, oppure lascia questi controlli al worker.',
+	);
+}
 
 // Initialize proxy manager
 const proxyManager = createProxyManagerFromEnv();
@@ -162,6 +189,23 @@ async function runTier0(url, { recipe, lastKnownPrice, timeoutMs, fetchHtmlImpl 
 		};
 	}
 
+	// Una pagina di sfida torna con status 200 e si interpreta senza errori:
+	// semplicemente non contiene nulla. Senza questo controllo il motore la
+	// scambia per una pagina prodotto priva di prezzo, e l'utente si sente dire
+	// che la SUA pagina non ha un prezzo mentre il problema e' che il sito non
+	// ce l'ha mai mostrata.
+	const challenge = detectInHtml(fetched.html);
+	if (challenge.detected) {
+		console.warn(`[Scraper] Tier 0: pagina di sfida ${challenge.type} ("${challenge.title}"), ${challenge.bytes} byte`);
+		return {
+			data: null,
+			skipped: `sfida_${challenge.type.toLowerCase()}`,
+			antiBotSuspected: true,
+			durationMs: fetched.durationMs,
+			evidence: { htmlBytes: challenge.bytes, pageTitle: challenge.title, indicators: challenge.indicators },
+		};
+	}
+
 	const data = interpret(fetched.html, {
 		url,
 		recipe,
@@ -170,9 +214,43 @@ async function runTier0(url, { recipe, lastKnownPrice, timeoutMs, fetchHtmlImpl 
 		fastPathThreshold: FAST_PATH_THRESHOLD,
 	});
 
-	console.log(`[Scraper] Tier 0: confidenza ${data.confidence} in ${fetched.durationMs}ms`);
+	const evidence = { htmlBytes: challenge.bytes, pageTitle: challenge.title, indicators: challenge.indicators };
 
-	return { data, skipped: null, antiBotSuspected: false, durationMs: fetched.durationMs };
+	// Quando si puo' dire che di pagina non ne e' arrivata una - cosa diversa
+	// dal giudizio «questa pagina non ha un prezzo», che presuppone di averla
+	// vista.
+	//
+	// Zero candidati da sei estrattori indipendenti basta da solo: su un HTML
+	// reale non capita, perche' anche una pagina «chi siamo» produce un titolo.
+	//
+	// La dimensione invece non basta MAI da sola, ed e' un errore che vale la
+	// pena ricordare: le fixture di questo progetto stanno in poco piu' di un
+	// kilobyte e si leggono benissimo. Conta solo combinata con l'assenza di
+	// qualunque candidato prezzo - una risposta minuscola da cui non esce un
+	// numero non e' una scheda prodotto.
+	//
+	// Non basta nemmeno l'assenza del solo prezzo su una pagina piena: una
+	// scheda legittima puo' non averlo - esaurito, prezzo su richiesta - e
+	// quella e' un'altra risposta, che spetta a chi chiama.
+	const candidates = data.candidates || [];
+	const producedNothing = candidates.length === 0;
+	const noPrice = !candidates.some((candidate) => candidate.field === 'price');
+	const implausiblePage = challenge.reason === 'pagina_troppo_piccola';
+
+	if (producedNothing || (implausiblePage && noPrice)) {
+		console.warn(`[Scraper] Tier 0: pagina non utilizzabile, ${challenge.bytes} byte ("${challenge.title}"), ${candidates.length} candidati, nessun prezzo`);
+		return {
+			data: null,
+			skipped: producedNothing ? 'nessun_candidato' : (challenge.reason || 'nessun_candidato'),
+			antiBotSuspected: false,
+			durationMs: fetched.durationMs,
+			evidence,
+		};
+	}
+
+	console.log(`[Scraper] Tier 0: confidenza ${data.confidence} in ${fetched.durationMs}ms (${challenge.bytes} byte)`);
+
+	return { data, skipped: null, antiBotSuspected: false, durationMs: fetched.durationMs, evidence };
 }
 
 /**
@@ -347,6 +425,7 @@ async function scrapeProduct(url, options = {}) {
 	let best = null;
 	let tier0Skipped = null;
 	let antiBotSuspected = false;
+	let evidence = null;
 
 	// --- Tier 0 ---
 	if (allowHttp) {
@@ -356,13 +435,14 @@ async function scrapeProduct(url, options = {}) {
 				const tier0 = await runTier0(url, { ...context, timeoutMs, fetchHtmlImpl });
 				tier0Skipped = tier0.skipped;
 				antiBotSuspected = tier0.antiBotSuspected;
+				evidence = tier0.evidence || null;
 
 				if (tier0.data) {
 					best = { data: tier0.data, tier: 0 };
 					// Abbastanza affidabile: il browser non serve, ed e' il caso
 					// normale per ogni pagina con dati strutturati.
 					if (tier0.data.confidence >= TIER0_THRESHOLD && tier0.data.priceValue !== null) {
-						return withDebug(tier0.data, { url, tier: 0, attempt: 1, startedAt, tier0Skipped: null });
+						return withDebug(tier0.data, { url, tier: 0, attempt: 1, startedAt, tier0Skipped: null, evidence });
 					}
 					console.log(`[Scraper] Tier 0 sotto soglia (${tier0.data.confidence} < ${TIER0_THRESHOLD}): salgo al browser`);
 				}
@@ -377,7 +457,7 @@ async function scrapeProduct(url, options = {}) {
 
 	// --- Tier 1 ---
 	if (!allowBrowser) {
-		return finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, reason: 'browser_non_consentito' });
+		return finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, evidence, reason: 'browser_non_consentito' });
 	}
 
 	let lastError = null;
@@ -385,7 +465,7 @@ async function scrapeProduct(url, options = {}) {
 	for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
 		if (remaining() < BROWSER_MIN_MS) {
 			console.warn(`[Scraper] Budget insufficiente per il browser (${remaining()}ms < ${BROWSER_MIN_MS}ms)`);
-			return finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, reason: 'budget_esaurito', lastError });
+			return finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, evidence, reason: 'budget_esaurito', lastError });
 		}
 
 		try {
@@ -393,7 +473,7 @@ async function scrapeProduct(url, options = {}) {
 			// chiusura, mai piu' del budget stesso.
 			const navigationTimeoutMs = Math.max(remaining() - 3000, 2000);
 			const data = await runTier1(url, { ...context, attempt, navigationTimeoutMs });
-			return withDebug(data, { url, tier: 1, attempt: attempt + 1, startedAt, tier0Skipped });
+			return withDebug(data, { url, tier: 1, attempt: attempt + 1, startedAt, tier0Skipped, evidence });
 		} catch (error) {
 			lastError = error;
 			console.error(`[Scraper] Error on attempt ${attempt + 1}:`, error.message);
@@ -411,7 +491,7 @@ async function scrapeProduct(url, options = {}) {
 		}
 	}
 
-	return finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, reason: 'browser_fallito', lastError });
+	return finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, evidence, reason: 'browser_fallito', lastError });
 }
 
 /**
@@ -422,9 +502,9 @@ async function scrapeProduct(url, options = {}) {
  * c'e' nulla si lancia, perche' un risultato vuoto sarebbe indistinguibile da
  * una pagina senza prezzo.
  */
-function finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, reason, lastError }) {
+function finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, evidence, reason, lastError }) {
 	if (best) {
-		return withDebug(best.data, { url, tier: best.tier, attempt: 1, startedAt, tier0Skipped, degraded: reason });
+		return withDebug(best.data, { url, tier: best.tier, attempt: 1, startedAt, tier0Skipped, evidence, degraded: reason });
 	}
 
 	const detail = lastError ? `: ${lastError.message}` : '';
@@ -433,11 +513,12 @@ function finish(best, { url, startedAt, tier0Skipped, antiBotSuspected, reason, 
 	error.reason = reason;
 	error.antiBotSuspected = antiBotSuspected;
 	error.tier0Skipped = tier0Skipped;
+	error.evidence = evidence;
 	throw error;
 }
 
 /** Attacca la diagnostica al risultato, nella forma che finisce in scrape_runs. */
-function withDebug(data, { url, tier, attempt, startedAt, tier0Skipped, degraded = null }) {
+function withDebug(data, { url, tier, attempt, startedAt, tier0Skipped, evidence = null, degraded = null }) {
 	data.debug = {
 		url,
 		tier,
@@ -451,6 +532,13 @@ function withDebug(data, { url, tier, attempt, startedAt, tier0Skipped, degraded
 		tier0Skipped,
 		degraded,
 		totalMs: Date.now() - startedAt,
+		htmlBytes: evidence?.htmlBytes ?? null,
+		pageTitle: evidence?.pageTitle || null,
+		// Chi ha prodotto candidati e chi no: e' la prima cosa da guardare
+		// quando la confidenza e' bassa e non si sa perche'.
+		extractors: (data.extractorsRan || [])
+			.map((e) => `${e.name}:${e.candidates}${e.error ? '!' : ''}`)
+			.join(' '),
 		userAgent: data.userAgent ? data.userAgent.substring(0, 50) : null,
 		proxyUsed: Boolean(data.proxyUsed),
 		captchaDetected: Boolean(data.captchaDetected),
@@ -474,12 +562,14 @@ function getScraperStats() {
 		userAgentCount: userAgentManager.getAllUserAgents().length,
 		tier0: { enabled: TIER0_ENABLED, threshold: TIER0_THRESHOLD, timeoutMs: TIER0_TIMEOUT_MS },
 		budgetMs: DEFAULT_BUDGET_MS,
+		browserReachable: browserReachable(),
 	};
 }
 
 module.exports = {
 	scrapeProduct,
 	getScraperStats,
+	browserReachable,
 	BUDGET_EXCEEDED,
 	DEFAULT_BUDGET_MS,
 };

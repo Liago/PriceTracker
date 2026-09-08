@@ -59,6 +59,53 @@ function respondBudgetExceeded(res, error) {
 }
 
 /**
+ * La diagnostica di un tentativo, nella forma che serve a chi legge la
+ * risposta.
+ *
+ * Un errore che non dice dove si e' fermato costringe a indovinare, e su un
+ * motore che attraversa rete, anti-bot e sei estrattori indipendenti indovinare
+ * non e' realistico. Sono tutti dati sul NOSTRO tentativo - quale tier, quanti
+ * byte, quali estrattori hanno prodotto qualcosa - non sul contenuto della
+ * pagina: non c'e' nulla da proteggere e c'e' tutto da guadagnare.
+ */
+function describeAttempt(scraped) {
+	const debug = scraped?.debug || {};
+	return {
+		tier: debug.tier ?? null,
+		usedBrowser: Boolean(debug.usedBrowser),
+		degraded: debug.degraded || null,
+		tier0Skipped: debug.tier0Skipped || null,
+		htmlBytes: debug.htmlBytes ?? null,
+		pageTitle: debug.pageTitle || null,
+		extractors: debug.extractors || null,
+		totalMs: debug.totalMs ?? null,
+	};
+}
+
+/**
+ * Non si e' riusciti a leggere la pagina fino in fondo.
+ *
+ * E' diverso da «questa pagina non ha un prezzo», che e' un giudizio
+ * definitivo su una pagina che abbiamo visto per intero. Qui non l'abbiamo
+ * vista: il browser non e' partito, o il sito ci ha serviato una sfida al suo
+ * posto. Dirlo con lo stesso 422 manderebbe l'utente a cercare il problema
+ * nell'URL che ha incollato, che e' il posto sbagliato.
+ */
+function respondIncomplete(res, scraped) {
+	const attempt = describeAttempt(scraped);
+	console.warn(`[API] Lettura incompleta: ${attempt.degraded}, tier ${attempt.tier}, ${attempt.htmlBytes} byte`);
+
+	return res.status(503).json({
+		error: attempt.tier0Skipped?.startsWith('sfida_')
+			? 'Il sito ha risposto con una verifica di sicurezza invece della pagina prodotto'
+			: 'Non sono riuscito a leggere la pagina fino in fondo',
+		code: 'SCRAPE_INCOMPLETE',
+		reason: attempt.degraded,
+		diagnostics: attempt,
+	});
+}
+
+/**
  * Estrae l'utente dal token di sessione Supabase.
  * @returns {Promise<{user: object|null, error: string|null}>}
  */
@@ -129,11 +176,20 @@ function registerRoutes({ getClient }) {
 
 				// Nessun prezzo leggibile: il prodotto non viene creato. Una storia
 				// prezzi che parte da un numero sbagliato non e' recuperabile.
+				//
+				// Prima pero' bisogna sapere di cosa si sta parlando. Se la lettura
+				// e' rimasta a meta' - il browser non e' partito nel budget, oppure
+				// il sito ha risposto con una sfida - allora non si e' visto niente,
+				// e dire «questa pagina non ha un prezzo» sarebbe un'affermazione
+				// che non siamo in grado di fare.
 				if (data.priceValue === null) {
+					if (scraped.debug?.degraded) return respondIncomplete(res, scraped);
+
 					return res.status(422).json({
 						error: 'Nessun prezzo leggibile su quella pagina',
 						code: 'LOW_CONFIDENCE',
 						confidence: scraped.confidence ?? 0,
+						diagnostics: describeAttempt(scraped),
 					});
 				}
 
