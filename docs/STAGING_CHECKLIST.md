@@ -24,15 +24,22 @@ ordine, e di cosa guardare.
 | `SCRAPE_TIER0_TIMEOUT_MS` | opzionale, default 6000 |
 | `SCRAPE_BROWSER_MIN_MS` | opzionale, default 8000. Tempo residuo sotto il quale Chromium non viene nemmeno avviato |
 
-> **Il vincolo che decide tutto.** Perché il browser possa partire serve
-> `SCRAPE_REQUEST_BUDGET_MS >= SCRAPE_TIER0_TIMEOUT_MS + SCRAPE_BROWSER_MIN_MS`,
-> cioè almeno **14 secondi**. Con i default (9000) non ci sta: sulle richieste
-> sincrone esiste **solo il tier 0**, e ogni pagina che l'HTML statico non
-> risolve risponde `503 SCRAPE_INCOMPLETE`. Non è un guasto, è aritmetica — e
-> il motore lo dice da sé, con un avviso `[Scraper] ... il browser non parte
-> mai` al primo caricamento. Se la piattaforma concede più di 10 secondi, alza
-> il budget lasciando ~1s di margine per la risposta. Altrimenti quei controlli
-> vanno lasciati al worker, che di budget ne ha 20.
+> **Il vincolo che decide tutto.** La disponibilità del browser ha tre gradi,
+> e il motore li stampa da sé al primo caricamento:
+>
+> - **sempre** — `SCRAPE_REQUEST_BUDGET_MS >= SCRAPE_TIER0_TIMEOUT_MS +
+>   SCRAPE_BROWSER_MIN_MS` (≥ 14s con i default).
+> - **condizionato** — il budget copre l'avvio del browser ma non anche una GET
+>   portata al suo limite. È il caso dei default (9000): al browser ci si
+>   arriva quando il sito **rifiuta subito** la GET, non quando la pagina è
+>   lenta. E quando ci si arriva gli resta poco per navigare, quindi rischia di
+>   leggere una pagina a metà.
+> - **mai** — il budget non copre nemmeno l'avvio.
+>
+> Se la piattaforma concede più di 10 secondi (guarda `diagnostics.totalMs`:
+> se una risposta ti è arrivata con 10800 ms, il limite è più alto), alza il
+> budget lasciando ~1s di margine. Un tier 1 con poco tempo è peggio di nessun
+> tier 1: produce letture troncate.
 
 **Migrazioni.** Vanno applicate *prima* del deploy del codice: il codice nuovo
 usa tabelle che le migrazioni creano.
@@ -100,6 +107,11 @@ Tre prefissi stabili, tutti grep-abili dai log di Netlify:
 - `[Scraper] Tier 0: pagina di sfida` — il sito ha risposto con una verifica
   di sicurezza (Cloudflare, DataDome, PerimeterX…) al posto della pagina. La
   riga riporta il fornitore, il titolo ricevuto e i byte.
+- `[Scraper] Tier 1: pagina non utilizzabile (navigazione_troncata)` — il
+  browser è partito ma la navigazione non è arrivata in fondo nel tempo
+  concesso, e quel che restava era il guscio vuoto del documento. È il segnale
+  che il budget è troppo stretto per il tier 1: o lo si alza, o si accetta di
+  vivere di solo tier 0.
 - `[Dispatcher]` — quanti job accodati, quanti non dovuti, quanti in attesa.
 - `[Worker …]` — quanti job elaborati e quanti restano.
 
@@ -118,7 +130,9 @@ accettazione per dominio? Si ricava contando le righe `[Metric]` con
 | Worker che non partono | log Netlify | manca `SUPABASE_SERVICE_ROLE_KEY` |
 | 504 con una pagina HTML («Inactivity Timeout») al posto di JSON | log Netlify, durata della function | la richiesta ha superato il timeout della piattaforma: `SCRAPE_REQUEST_BUDGET_MS` è troppo alto per il limite del tuo piano |
 | 504 JSON con `code: SCRAPE_BUDGET_EXCEEDED` | il campo `reason` nella risposta | è il motore che si ferma per tempo, non il proxy che tronca. `budget_esaurito`: la pagina è lenta; `antiBotSuspected: true`: il sito rifiuta la lettura automatica |
-| 503 `SCRAPE_INCOMPLETE` | il blocco `diagnostics` nella risposta | la pagina non è stata letta fino in fondo. `tier0Skipped: "sfida_*"`: il sito ha risposto con una verifica di sicurezza; `degraded: "budget_esaurito"`: il browser non è partito (vedi il vincolo in §1) |
+| `SCRAPE_INCOMPLETE` con status **503** | `diagnostics.reason` | il sito ci ha rifiutati: `sfida_*` (verifica di sicurezza) o `bloccato_dal_sito_403` (status anti-bot sulla GET). Il budget non c'entra |
+| `SCRAPE_INCOMPLETE` con status **504** | `diagnostics.navigationTimedOut` | questione di tempo: `navigazione_troncata` (il browser è partito ma non ha finito di caricare) o `budget_esaurito`. **Qui alzare il budget serve** |
+| `SCRAPE_INCOMPLETE` con status **502** | `diagnostics.htmlBytes` | il sito ha risposto con una pagina vuota: `nessun_candidato` o `pagina_troppo_piccola` |
 | 422 `LOW_CONFIDENCE` con `diagnostics.htmlBytes` alto e `extractors` tutti a `:0` | `diagnostics.pageTitle` | la pagina è arrivata intera ma nessun estrattore ci ha trovato un prodotto: probabilmente non è una scheda prodotto, o è un listing |
 | Molti `Tier 0 sotto soglia` su un dominio | `[Scraper]` nei log | la ricetta di quel dominio non regge sull'HTML statico: il prezzo arriva da JavaScript |
 

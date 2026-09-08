@@ -155,3 +155,48 @@ describe('browserReachable - la configurazione dice la verita’ su se stessa', 
 		expect(browserReachable()).toBe(false);
 	});
 });
+
+/**
+ * Il tier 1 non aveva l'ispezione che il tier 0 aveva gia'.
+ *
+ * In produzione e' successo esattamente questo: la GET rifiutata con un blocco,
+ * il browser avviato con poco tempo, la navigazione in timeout, page.content()
+ * che restituisce il guscio vuoto del documento e la pipeline che ci trova
+ * zero candidati. Quel nulla diventava «questa pagina non ha un prezzo».
+ */
+describe('inspectResult - la regola vale per entrambi i tier', () => {
+	const { inspectResult } = scraperModule;
+	const full = { reason: null, bytes: 40000 };
+	const tiny = { reason: 'pagina_troppo_piccola', bytes: 120 };
+
+	it('zero candidati non e’ un risultato, comunque sia arrivata la pagina', () => {
+		expect(inspectResult({ candidates: [] }, full)).toEqual({ usable: false, reason: 'nessun_candidato' });
+	});
+
+	it('una pagina minuscola senza candidato prezzo non e’ un risultato', () => {
+		const data = { candidates: [{ field: 'title', value: 'x' }] };
+		expect(inspectResult(data, tiny)).toEqual({ usable: false, reason: 'pagina_troppo_piccola' });
+	});
+
+	it('ma se un prezzo c’e’, la dimensione non conta: le fixture sono piccole', () => {
+		const data = { candidates: [{ field: 'price', value: 199 }] };
+		expect(inspectResult(data, tiny).usable).toBe(true);
+	});
+
+	it('una pagina piena senza prezzo e’ un risultato: sara’ chi chiama a giudicarlo', () => {
+		// Esaurito, prezzo su richiesta: casi legittimi, non letture fallite.
+		const data = { candidates: [{ field: 'title', value: 'Prodotto' }] };
+		expect(inspectResult(data, full).usable).toBe(true);
+	});
+});
+
+describe('browserReachability - i tre gradi, non due', () => {
+	const { browserReachability } = scraperModule;
+
+	it('con i default il browser e’ raggiungibile solo se il tier 0 rinuncia in fretta', () => {
+		// E' il caso osservato in produzione: la GET viene rifiutata con un
+		// blocco in poche centinaia di millisecondi, quindi il residuo basta.
+		// Dire «non parte mai», come faceva la prima versione, era falso.
+		expect(browserReachability().level).toBe('condizionato');
+	});
+});

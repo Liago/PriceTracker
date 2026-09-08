@@ -51,18 +51,47 @@ const ANTI_BOT_STATUSES = new Set([401, 403, 405, 406, 429, 503]);
 /**
  * Header di una richiesta che somiglia a un browser.
  *
- * Non e' mimetismo per aggirare qualcuno: e' che molti shop servono una
- * pagina diversa - o nessuna - a chi non manda un Accept credibile.
+ * Non e' mimetismo per aggirare qualcuno: e' che molti shop servono una pagina
+ * diversa - o nessuna - a chi non manda l'insieme di header che un browser
+ * manda sempre. La prima versione aveva solo User-Agent, Accept e
+ * Accept-Language, e in produzione si e' presa un blocco: mancava tutto il
+ * gruppo Sec-Fetch, che ogni Chrome invia su ogni navigazione e la cui assenza
+ * e' un segnale piu' forte di uno User-Agent qualunque.
+ *
+ * Gli hint sec-ch-ua si mandano solo con uno User-Agent Chromium, perche' un
+ * Firefox che li dichiarasse sarebbe piu' sospetto di uno che li omette: fra
+ * gli header conta la coerenza, non il numero.
  *
  * @param {string} url
  * @returns {object}
  */
 function browserHeaders(url) {
+	const userAgent = userAgentManager.getUserAgentForUrl(url);
+	const chromeVersion = /Firefox/.test(userAgent) ? null : /Chrome\/(\d+)/.exec(userAgent);
+	const isEdge = /Edg\//.test(userAgent);
+
 	return {
-		'User-Agent': userAgentManager.getUserAgentForUrl(url),
-		Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+		'User-Agent': userAgent,
+		Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
 		'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7',
+		// Non si dichiara "br": la decompressione Brotli non e' garantita su
+		// ogni runtime, e una risposta compressa che non sappiamo aprire e'
+		// peggio di una non compressa.
+		'Accept-Encoding': 'gzip, deflate',
 		'Upgrade-Insecure-Requests': '1',
+		// Il gruppo che identifica una navigazione: documento di primo livello,
+		// aperto dall'utente, non una sottorisorsa caricata da uno script.
+		'Sec-Fetch-Dest': 'document',
+		'Sec-Fetch-Mode': 'navigate',
+		'Sec-Fetch-Site': 'none',
+		'Sec-Fetch-User': '?1',
+		...(chromeVersion ? {
+			'sec-ch-ua': isEdge
+				? `"Microsoft Edge";v="${chromeVersion[1]}", "Chromium";v="${chromeVersion[1]}", "Not?A_Brand";v="24"`
+				: `"Chromium";v="${chromeVersion[1]}", "Google Chrome";v="${chromeVersion[1]}", "Not?A_Brand";v="24"`,
+			'sec-ch-ua-mobile': '?0',
+			'sec-ch-ua-platform': /Macintosh/.test(userAgent) ? '"macOS"' : '"Windows"',
+		} : {}),
 	};
 }
 

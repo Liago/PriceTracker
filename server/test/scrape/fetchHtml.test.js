@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fetchHtmlModule from '../../scrape/fetchHtml.js';
 
-const { fetchHtml, decodeHtml, SKIP } = fetchHtmlModule;
+const { fetchHtml, decodeHtml, browserHeaders, SKIP } = fetchHtmlModule;
 
 /** Risposta finta, con la superficie di Response che fetchHtml usa davvero. */
 function fakeResponse({ status = 200, headers = {}, body = '', encoding = 'utf8' } = {}) {
@@ -49,6 +49,39 @@ describe('fetchHtml - il percorso normale', () => {
 		expect(seen.headers['User-Agent']).toMatch(/Mozilla/);
 		expect(seen.headers['Accept-Language']).toContain('it-IT');
 		expect(seen.redirect).toBe('manual');
+	});
+
+	it('manda il gruppo Sec-Fetch di una navigazione vera', () => {
+		// La sua assenza e' cio' che ha fatto rifiutare la GET in produzione:
+		// pesa piu' dello User-Agent, perche' nessun browser lo omette.
+		const headers = browserHeaders('https://shop.it/p');
+
+		expect(headers['Sec-Fetch-Dest']).toBe('document');
+		expect(headers['Sec-Fetch-Mode']).toBe('navigate');
+		expect(headers['Sec-Fetch-User']).toBe('?1');
+		expect(headers['Upgrade-Insecure-Requests']).toBe('1');
+	});
+
+	it('gli hint sec-ch-ua restano coerenti con lo User-Agent', () => {
+		// Un Firefox che dichiarasse sec-ch-ua sarebbe piu' sospetto di uno che
+		// li omette: fra gli header conta la coerenza, non il numero.
+		for (let i = 0; i < 40; i++) {
+			const headers = browserHeaders('https://shop.it/p');
+			const ua = headers['User-Agent'];
+			const isChromium = /Chrome\//.test(ua) && !/Firefox/.test(ua);
+
+			expect(Boolean(headers['sec-ch-ua'])).toBe(isChromium);
+
+			if (isChromium) {
+				const version = /Chrome\/(\d+)/.exec(ua)[1];
+				expect(headers['sec-ch-ua']).toContain(`v="${version}"`);
+				expect(headers['sec-ch-ua-platform']).toBe(/Macintosh/.test(ua) ? '"macOS"' : '"Windows"');
+			}
+		}
+	});
+
+	it('non dichiara brotli, che non ogni runtime sa decomprimere', () => {
+		expect(browserHeaders('https://shop.it/p')['Accept-Encoding']).not.toContain('br');
 	});
 });
 
