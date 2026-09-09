@@ -7,7 +7,7 @@ import TrackingHealthBadge from '../components/TrackingHealthBadge'
 import PriceFeedbackButton from '../components/PriceFeedbackButton'
 import { useAuth } from '../context/AuthContext'
 import ConfirmationModal from '../components/ConfirmationModal'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
+import PriceHistoryChart from '../components/PriceHistoryChart'
 import { refreshProduct } from '../lib/api'
 
 /**
@@ -86,17 +86,17 @@ export default function ProductDetail() {
 
       if (historyError) throw historyError
       
-      // Format history for chart
-      const formattedHistory = historyData.map(item => ({
-        price: Number(item.price),
-        date: new Date(item.recorded_at).toLocaleDateString(undefined, { 
-          month: 'short', 
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        }),
-        originalDate: item.recorded_at
-      }))
+      // Il tempo resta un numero fino al disegno. Formattarlo qui - com'era
+      // prima - lo trasformava in una categoria per il grafico: due letture a
+      // cinque minuti di distanza finivano lontane quanto due a una settimana,
+      // e la forma della curva mentiva sui tempi.
+      const formattedHistory = historyData
+        .map(item => ({
+          price: Number(item.price),
+          timestamp: new Date(item.recorded_at).getTime(),
+          originalDate: item.recorded_at,
+        }))
+        .filter(point => Number.isFinite(point.price) && Number.isFinite(point.timestamp))
       
       setPriceHistory(formattedHistory)
 
@@ -407,42 +407,7 @@ export default function ProductDetail() {
         {/* Price History Chart */}
         <div className="bg-gray-800 rounded-xl border border-gray-700 shadow-2xl p-8">
           <h2 className="text-xl font-bold mb-6">Price History</h2>
-          <div className="h-[300px] w-full">
-            {priceHistory.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={priceHistory}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis 
-                    dataKey="date" 
-                    stroke="#9CA3AF" 
-                    tick={{ fill: '#9CA3AF' }}
-                    tickMargin={10}
-                  />
-                  <YAxis 
-                    stroke="#9CA3AF" 
-                    tick={{ fill: '#9CA3AF' }}
-                    domain={['auto', 'auto']}
-                  />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#1F2937', borderColor: '#374151', color: '#fff' }}
-                    itemStyle={{ color: '#fff' }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="price" 
-                    stroke="#3B82F6" 
-                    strokeWidth={2}
-                    dot={{ fill: '#3B82F6', strokeWidth: 2 }}
-                    activeDot={{ r: 8 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-gray-500">
-                No price history available yet.
-              </div>
-            )}
-          </div>
+          <PriceHistoryChart history={priceHistory} currency={product.currency || ''} />
         </div>
 
         <ConfirmationModal
