@@ -23,12 +23,45 @@ const REASONS = Object.freeze({
 	OK: 'ok',
 	EMPTY: 'empty',
 	NOT_A_PRICE: 'not_a_price',
+	CONCATENATED: 'cifre_concatenate',
 	PERCENTAGE: 'percentage',
 	NEGATIVE: 'negative',
 	ZERO: 'zero',
 	TOO_LARGE: 'too_large',
 	NOT_FINITE: 'not_finite',
 });
+
+/**
+ * Gli spazi fra le cifre sono un raggruppamento delle migliaia, o due nodi del
+ * DOM finiti attaccati?
+ *
+ * La distinzione non e' teorica. Amazon scrive il prezzo su nodi separati -
+ * `a-price-whole` con "149" e `a-price-fraction` con "99" - e chi legge il
+ * testo del contenitore invece del solo `a-offscreen` ottiene "149" e "99"
+ * separati da spazi o da un a capo. Il parser toglieva ogni whitespace come
+ * se fosse un separatore delle migliaia alla francese, e da 149,99 usciva
+ * 14999. In produzione e' successo: una scrivania da 149,99 registrata a
+ * 8999, con reason "ok" e tracking_health "healthy".
+ *
+ * La regola che li separa e' semplice e vale in ogni locale: un separatore
+ * delle migliaia raggruppa SEMPRE per tre. "1 234,56" e' un numero; "89 99"
+ * non lo e' in nessuna convenzione, e un a capo fra due cifre non e' un
+ * formato numerico da nessuna parte.
+ *
+ * @param {string} text
+ * @returns {boolean} vero se gli spazi presenti NON formano un raggruppamento valido
+ */
+function hasBrokenGrouping(text) {
+	// La prima sequenza numerica, spazi e separatori compresi.
+	const run = /\d(?:[\d.,\s'’ʼ ]*\d)?/.exec(text);
+	if (!run) return false;
+
+	const candidate = run[0];
+	if (!/[\s'’ʼ ]/.test(candidate)) return false; // niente spazi: nulla da giudicare
+
+	// Con gli spazi dentro: 1-3 cifre, poi gruppi da tre, poi al piu' i decimali.
+	return !/^\d{1,3}(?:[\s'’ʼ ]\d{3})+(?:[.,]\d{1,2})?$/.test(candidate.trim());
+}
 
 /**
  * Decide come interpretare punti e virgole in un numero gia' ripulito.
@@ -104,6 +137,10 @@ function parsePriceDetailed(input, options = {}) {
 		// Una percentuale non e' un prezzo: e' quasi sempre uno sconto.
 		if (text.includes('%')) return fail(REASONS.PERCENTAGE);
 
+		// Prima di togliere gli spazi bisogna sapere che cosa sono: toglierli da
+		// "89\n99" fabbrica un numero che nella pagina non c'era.
+		if (hasBrokenGrouping(text)) return fail(REASONS.CONCATENATED);
+
 		const cleaned = text.replace(GROUP_SEPARATORS, '');
 
 		// Primo gruppo numerico: se la stringa e' un intervallo ("da 199 a 249")
@@ -144,6 +181,7 @@ function parsePrice(input, options) {
 }
 
 module.exports = {
+	hasBrokenGrouping,
 	parsePrice,
 	parsePriceDetailed,
 	resolveSeparators,

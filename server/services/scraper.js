@@ -77,6 +77,49 @@ const NAVIGATION_MIN_MS = parseInt(process.env.SCRAPE_NAVIGATION_MIN_MS || '4000
 const BUDGET_EXCEEDED = 'SCRAPE_BUDGET_EXCEEDED';
 
 /**
+ * Quanto e' costato l'ultimo avvio di Chromium, in questo processo.
+ *
+ * BROWSER_MIN_MS e' una stima tarata sull'avvio a freddo, quando il binario va
+ * decompresso in /tmp. Su un container gia' caldo lo stesso avvio costa qualche
+ * centinaio di millisecondi, e usare la stima significava dichiarare
+ * «budget insufficiente» con otto secondi ancora liberi: il ritentativo con un
+ * altro User-Agent - la difesa prevista contro l'anti-bot - non e' mai partito
+ * nemmeno una volta.
+ *
+ * Il valore osservato sostituisce la stima appena ce n'e' uno. E' per processo,
+ * quindi si azzera con il container: la prima invocazione a freddo usa la
+ * stima, che e' esattamente il caso in cui la stima e' giusta.
+ */
+let observedBrowserStartMs = null;
+
+/**
+ * Il tempo residuo sotto il quale non ha senso avviare il browser.
+ * @returns {number}
+ */
+function browserBudgetNeeded() {
+	if (observedBrowserStartMs === null) return BROWSER_MIN_MS;
+	// Un terzo di margine sull'avvio osservato: varia fra invocazioni.
+	return Math.ceil(observedBrowserStartMs * 1.33) + NAVIGATION_MIN_MS + RESPONSE_RESERVE_MS;
+}
+
+/**
+ * Quanto aspettare prima di riprovare.
+ *
+ * Su una sfida anti-bot il backoff esponenziale e' la cura sbagliata: non si
+ * sta aspettando che un servizio sovraccarico si riprenda, si sta cambiando
+ * identita', e il cambio di User-Agent e' immediato. Attendere due secondi
+ * consuma il budget che serve al tentativo stesso. Sugli errori di rete il
+ * backoff resta quello di prima.
+ */
+function retryDelay(error, attempt) {
+	if (error.message.includes('CAPTCHA_DETECTED')) return CHALLENGE_RETRY_MS;
+	return getBackoffDelay(attempt);
+}
+
+/** Pausa fra due tentativi su una sfida: non aggressiva, non sprecona. */
+const CHALLENGE_RETRY_MS = parseInt(process.env.SCRAPE_CHALLENGE_RETRY_MS || '500', 10);
+
+/**
  * Il tier 1 e' raggiungibile con questa configurazione?
  *
  * La risposta ha due gradi, ed e' bene non confonderli - una versione
@@ -96,10 +139,11 @@ const BUDGET_EXCEEDED = 'SCRAPE_BUDGET_EXCEEDED';
  * @returns {{level: 'sempre'|'condizionato'|'mai', needsForAlways: number}}
  */
 function browserReachability() {
-	const needsForAlways = TIER0_TIMEOUT_MS + BROWSER_MIN_MS;
-	if (DEFAULT_BUDGET_MS >= needsForAlways) return { level: 'sempre', needsForAlways };
-	if (DEFAULT_BUDGET_MS >= BROWSER_MIN_MS) return { level: 'condizionato', needsForAlways };
-	return { level: 'mai', needsForAlways };
+	const needed = browserBudgetNeeded();
+	const needsForAlways = TIER0_TIMEOUT_MS + needed;
+	if (DEFAULT_BUDGET_MS >= needsForAlways) return { level: 'sempre', needsForAlways, needed };
+	if (DEFAULT_BUDGET_MS >= needed) return { level: 'condizionato', needsForAlways, needed };
+	return { level: 'mai', needsForAlways, needed };
 }
 
 /** @returns {boolean} vero solo se il tier 1 e' disponibile in ogni caso. */
@@ -118,7 +162,7 @@ function browserReachable() {
 	} else if (level === 'mai') {
 		console.warn(
 			`[Scraper] Con SCRAPE_REQUEST_BUDGET_MS=${DEFAULT_BUDGET_MS} il browser non parte mai `
-			+ `(ne servono almeno ${BROWSER_MIN_MS} solo per avviarlo). Esiste solo il tier 0.`,
+			+ `(ne servono almeno ${browserBudgetNeeded()} solo per avviarlo). Esiste solo il tier 0.`,
 		);
 	}
 }
@@ -335,6 +379,7 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline }) {
 		const launchedAt = Date.now();
 		browser = await createBrowser(proxy);
 		const browserStartMs = Date.now() - launchedAt;
+		observedBrowserStartMs = browserStartMs;
 
 		const navigationTimeoutMs = deadline - Date.now() - RESPONSE_RESERVE_MS;
 		console.log(`[Scraper] Browser avviato in ${browserStartMs}ms, restano ${navigationTimeoutMs}ms per navigare`);
@@ -415,7 +460,11 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline }) {
 
 			// Throw error to trigger retry with different UA/proxy
 			if (attempt < MAX_RETRIES - 1) {
-				throw new Error(`CAPTCHA_DETECTED:${captchaResult.type}`);
+				throw challengeError(captchaResult.type, {
+					browserStartMs,
+					challengeConfidence: captchaResult.confidence,
+					pageTitle: await page.title().catch(() => null),
+				});
 			}
 		}
 
@@ -432,8 +481,14 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline }) {
 		// non abbiamo mai visto.
 		const inspection = detectInHtml(html);
 		if (inspection.detected) {
-			console.warn(`[Scraper] Tier 1: pagina di sfida ${inspection.type} ("${inspection.title}")`);
-			throw new Error(`CAPTCHA_DETECTED:${inspection.type}`);
+			console.warn(`[Scraper] Tier 1: pagina di sfida ${inspection.type} ("${inspection.title}"), ${inspection.bytes} byte`);
+			throw challengeError(inspection.type, {
+				browserStartMs,
+				htmlBytes: inspection.bytes,
+				pageTitle: inspection.title,
+				challengeIndicators: inspection.indicators,
+				navigationTimedOut,
+			});
 		}
 
 		const data = interpret(html, {
@@ -496,6 +551,24 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline }) {
 		}
 		throw error;
 	}
+}
+
+/**
+ * L'errore di una sfida, con le prove attaccate.
+ *
+ * Prima si lanciava un `new Error('CAPTCHA_DETECTED:...')` nudo, e la
+ * diagnostica che arrivava all'utente era priva di tutto cio' che serviva a
+ * capire: quale sfida, quanto grande la pagina, che titolo, quanto era costato
+ * avviare il browser. Tutti campi che a quel punto erano gia' stati misurati e
+ * che si perdevano nel lancio.
+ *
+ * @param {string} type - il fornitore riconosciuto
+ * @param {object} evidence
+ */
+function challengeError(type, evidence) {
+	const error = new Error(`CAPTCHA_DETECTED:${type}`);
+	error.evidence = { challengeType: type, ...evidence };
+	return error;
 }
 
 /** L'errore giustifica un altro tentativo con browser? */
@@ -598,8 +671,8 @@ async function scrapeProduct(url, options = {}) {
 	let lastError = null;
 
 	for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-		if (remaining() < BROWSER_MIN_MS) {
-			console.warn(`[Scraper] Budget insufficiente per il browser (${remaining()}ms < ${BROWSER_MIN_MS}ms)`);
+		if (remaining() < browserBudgetNeeded()) {
+			console.warn(`[Scraper] Budget insufficiente per il browser (${remaining()}ms < ${browserBudgetNeeded()}ms)`);
 			return finish(best, { url, startedAt, tierReached, tier0Skipped, antiBotSuspected, evidence, reason: 'budget_esaurito', lastError });
 		}
 
@@ -618,13 +691,13 @@ async function scrapeProduct(url, options = {}) {
 
 			if (!isRetryable(error) || attempt >= MAX_RETRIES - 1) break;
 
-			const delay = getBackoffDelay(attempt);
-			if (remaining() - delay < BROWSER_MIN_MS) {
-				console.warn('[Scraper] Nessun tempo per un altro tentativo: mi fermo qui');
+			const delay = retryDelay(error, attempt);
+			if (remaining() - delay < browserBudgetNeeded()) {
+				console.warn(`[Scraper] Nessun tempo per un altro tentativo (${remaining()}ms): mi fermo qui`);
 				break;
 			}
 
-			console.log(`[Scraper] Retrying in ${Math.round(delay / 1000)}s...`);
+			console.log(`[Scraper] Retrying in ${delay}ms con un altro User-Agent...`);
 			await sleep(delay);
 		}
 	}
@@ -741,6 +814,8 @@ module.exports = {
 	getScraperStats,
 	browserReachable,
 	browserReachability,
+	browserBudgetNeeded,
+	retryDelay,
 	inspectResult,
 	BUDGET_EXCEEDED,
 	DEFAULT_BUDGET_MS,

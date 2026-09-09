@@ -9,7 +9,8 @@
     "dev": "nodemon index.js",
     "test:watch": "vitest",
     "migrate": "node database/migrate.js",
-    "migrate:status": "node database/migrate.js --status"
+    "migrate:status": "node database/migrate.js --status",
+    "check:proxy": "node scripts/checkProxy.js"
   },
   "keywords": [],
   "author": "",

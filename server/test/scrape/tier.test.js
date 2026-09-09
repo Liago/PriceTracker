@@ -268,3 +268,29 @@ describe('scrapeProduct - l’errore dice a che tier si e’ arrivati', () => {
 		}
 	});
 });
+
+/**
+ * Il caso osservato su tre domini diversi: la GET rifiutata con 403 e il
+ * browser che riceve una pagina di sfida.
+ */
+describe('quando il sito serve una sfida anche al browser', () => {
+	const { browserBudgetNeeded, retryDelay } = scraperModule;
+
+	it('sulla sfida si riprova subito, non dopo un backoff', () => {
+		// Il backoff esponenziale serve ad aspettare che un servizio
+		// sovraccarico si riprenda. Qui non si aspetta niente: si cambia
+		// User-Agent, ed è immediato. Due secondi di attesa consumerebbero il
+		// budget che serve al tentativo stesso.
+		const challenge = retryDelay(new Error('CAPTCHA_DETECTED:DataDome'), 0)
+		expect(challenge).toBeLessThanOrEqual(500);
+
+		// Su un errore di rete il backoff resta quello di prima.
+		expect(retryDelay(new Error('net::ERR_CONNECTION_RESET'), 1)).toBeGreaterThan(challenge);
+	});
+
+	it('a freddo la soglia resta la stima prudente', () => {
+		// Nessun avvio ancora osservato in questo processo: la stima tarata
+		// sull'avvio a freddo è quella giusta, ed è il caso in cui è giusta.
+		expect(browserBudgetNeeded()).toBe(8000);
+	});
+});
