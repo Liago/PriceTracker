@@ -212,6 +212,21 @@ function findPriceElements($) {
 		const tag = (element.tagName || element.name || '').toLowerCase();
 		if (tag === 'script' || tag === 'style' || tag === 'noscript') return;
 
+		// Niente che viva sotto aria-hidden="true".
+		//
+		// Non e' un accorgimento per un singolo sito: e' il contratto di
+		// quell'attributo. Marca contenuto che non va letto, quasi sempre
+		// perche' e' la resa VISIVA di qualcosa gia' presente in forma
+		// leggibile altrove - e una resa visiva e' fatta di pezzi.
+		//
+		// Amazon ne e' l'esempio esatto: il prezzo per gli assistivi sta in
+		// `.a-offscreen` come "149,99 €", mentre accanto, dentro un
+		// aria-hidden, gli stessi numeri sono spezzati fra `a-price-whole` e
+		// `a-price-fraction`. Leggendo quel sottoalbero si ottiene "14999" -
+		// un numero che nella pagina non c'e', cento volte il prezzo vero, e
+		// perfettamente plausibile per chiunque lo guardi dopo.
+		if ($(element).closest('[aria-hidden="true"]').length > 0) return;
+
 		const text = $(element).text().replace(/\s+/g, ' ').trim();
 		if (!looksLikePrice(text)) return;
 
