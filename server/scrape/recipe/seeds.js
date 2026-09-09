@@ -31,15 +31,33 @@ const STRUCTURED_FIELDS = Object.freeze({
 	brand: { strategy: 'jsonld' },
 });
 
-/** Amazon non espone un JSON-LD Product utilizzabile. */
+/**
+ * Amazon non espone un JSON-LD Product utilizzabile, quindi si legge dal DOM.
+ * Il che rende Amazon il dominio piu' pericoloso, non il piu' facile.
+ *
+ * Una pagina prodotto Amazon contiene decine di prezzi che non sono il prezzo
+ * del prodotto: sponsorizzati in testa, "Compra insieme", prodotti correlati,
+ * varianti di colore e taglia, offerte di terzi. `.a-price .a-offscreen` senza
+ * ambito prende il primo di tutti questi - e siccome l'applicatore di ricette
+ * risolve con `.first()`, il primo e' spesso uno sponsorizzato. E' successo in
+ * produzione: una sedia da 379,99 registrata a 109,83 per mesi, con
+ * tracking_health "healthy", perche' il selettore trovava sempre un numero.
+ *
+ * Da qui la regola che governa questi selettori: ogni fallback resta dentro la
+ * colonna centrale del prodotto. Se nessuno corrisponde non si legge nulla, e
+ * va bene cosi': il motore ha gia' il modo di dire «non ho letto il prezzo»,
+ * mentre non ha nessun modo di accorgersi di aver letto il prezzo sbagliato.
+ */
 const AMAZON_FIELDS = Object.freeze({
 	price: {
 		strategy: 'jsonld',
 		fallbacks: [
 			{ strategy: 'meta', key: 'product:price:amount' },
 			{ strategy: 'css', selector: '#corePriceDisplay_desktop_feature_div .a-price .a-offscreen', attr: null },
-			{ strategy: 'css', selector: '.apexPriceToPay .a-offscreen', attr: null },
-			{ strategy: 'css', selector: '.a-price .a-offscreen', attr: null },
+			{ strategy: 'css', selector: '#corePrice_feature_div .a-price .a-offscreen', attr: null },
+			{ strategy: 'css', selector: '#apex_desktop .a-price .a-offscreen', attr: null },
+			{ strategy: 'css', selector: '#centerCol .apexPriceToPay .a-offscreen', attr: null },
+			{ strategy: 'css', selector: '#centerCol .a-price .a-offscreen', attr: null },
 		],
 	},
 	title: {
@@ -51,6 +69,15 @@ const AMAZON_FIELDS = Object.freeze({
 		fallbacks: [{ strategy: 'css', selector: '#landingImage', attr: 'src' }],
 	},
 	currency: { strategy: 'meta', key: 'product:price:currency' },
+	// Mancava del tutto: senza, la disponibilita' di ogni prodotto Amazon
+	// restava 'unknown' per sempre, qualunque cosa dicesse la pagina.
+	availability: {
+		strategy: 'css', selector: '#availability', attr: null,
+		fallbacks: [
+			{ strategy: 'css', selector: '#availabilityInsideBuyBox_feature_div', attr: null },
+			{ strategy: 'jsonld' },
+		],
+	},
 });
 
 /** Swappie e Rework Labs si appoggiano ai meta Open Graph. */

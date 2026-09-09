@@ -83,7 +83,29 @@ function runPipeline(input, options = {}) {
 
 		if (produced.length > 0) {
 			const fastResult = reconcile(produced, { antiBotDetected });
-			if (fastResult.confidence >= fastPathThreshold) {
+
+			// Un prezzo arrivato per fallback non autorizza il fast path.
+			//
+			// La confidenza del fast path e' auto-referenziale: misura l'accordo
+			// fra sorgenti, ma il fast path le altre sorgenti non le esegue, per
+			// cui un unico candidato di una ricetta collaudata arriva vicino a 1
+			// senza che nulla lo abbia confermato. Finche' e' la strategia
+			// principale a produrlo il rischio e' accettabile - e' quella che ha
+			// funzionato l'ultima volta. Ma se ha smesso di funzionare e risponde
+			// un fallback, allora la pagina e' cambiata, ed e' esattamente il
+			// momento in cui fidarsi ciecamente costa di piu': su Amazon un
+			// fallback che scivola sul primo `.a-price` della pagina legge il
+			// prezzo di uno sponsorizzato, e nessuno se ne accorge perche' un
+			// numero c'e' sempre.
+			//
+			// Si paga una scoperta completa solo in quel caso, cioe' quando serve.
+			const priceViaFallback = produced.some((c) => c.field === 'price' && c.meta?.viaFallback);
+
+			if (priceViaFallback) {
+				console.log('[Pipeline] Prezzo dalla ricetta per fallback: eseguo comunque la scoperta per confronto');
+			}
+
+			if (!priceViaFallback && fastResult.confidence >= fastPathThreshold) {
 				return {
 					url: doc.url,
 					canonicalUrl: doc.canonicalUrl(),
