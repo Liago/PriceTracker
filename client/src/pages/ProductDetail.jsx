@@ -10,6 +10,41 @@ import ConfirmationModal from '../components/ConfirmationModal'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { refreshProduct } from '../lib/api'
 
+/**
+ * Come sta la disponibilita' di un prodotto.
+ *
+ * Si legge da `products.availability`, che e' la colonna che il motore
+ * aggiorna a ogni controllo. Prima si leggeva `details.available`, un booleano
+ * che il vecchio scraper scriveva dentro il JSON dei dettagli e che il motore
+ * nuovo non tocca piu': i prodotti aggiunti prima del refactor mostravano per
+ * sempre lo stato del giorno in cui erano stati aggiunti. Una sedia disponibile
+ * a 379,99 appariva «Currently Unavailable» perche' cosi' era stata letta a
+ * novembre.
+ *
+ * L'altra meta' del problema era il booleano stesso. `unknown` - il motore non
+ * e' riuscito a stabilirlo - non e' `false`, e mostrarlo come "esaurito"
+ * significa affermare una cosa che nessuno ha verificato. Uno stato ignoto non
+ * merita un'etichetta: si mostra il prezzo e basta.
+ *
+ * @param {object} product
+ * @returns {{unavailable: boolean, label: string|null}}
+ */
+function readAvailability(product) {
+  switch (product?.availability) {
+    case 'out_of_stock':
+      return { unavailable: true, label: 'Currently Unavailable' }
+    case 'discontinued':
+      return { unavailable: true, label: 'No Longer Available' }
+    case 'preorder':
+      return { unavailable: false, label: 'Pre-order' }
+    case 'backorder':
+      return { unavailable: false, label: 'On Backorder' }
+    default:
+      // in_stock, unknown, null: nessuna etichetta, nessuna affermazione.
+      return { unavailable: false, label: null }
+  }
+}
+
 export default function ProductDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -134,6 +169,8 @@ export default function ProductDetail() {
   if (loading) return <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">Loading...</div>
   if (!product) return null
 
+  const availability = readAvailability(product)
+
   return (
     <div className="p-4 md:p-8">
       <div className="max-w-4xl mx-auto">
@@ -227,14 +264,14 @@ export default function ProductDetail() {
                       <div className="skeleton h-12 w-48 bg-gray-700/50 rounded-lg"></div>
                       <div className="skeleton h-4 w-56 bg-gray-700/30 rounded"></div>
                     </div>
-                  ) : product.details?.available === false ? (
+                  ) : availability.unavailable ? (
                     <div className="flex flex-col">
                       <div className="text-3xl md:text-4xl font-bold text-gray-500 line-through decoration-red-500/50 decoration-2">
                         {product.currency} {product.current_price}
                       </div>
                       <div className="flex items-center gap-2 mt-2 text-red-400 bg-red-400/10 px-3 py-1 rounded-full w-fit">
                         <AlertCircle size={16} />
-                        <span className="text-sm font-bold uppercase tracking-wide">Currently Unavailable</span>
+                        <span className="text-sm font-bold uppercase tracking-wide">{availability.label}</span>
                       </div>
                     </div>
                   ) : (

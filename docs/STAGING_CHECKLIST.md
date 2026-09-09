@@ -95,10 +95,15 @@ select count(*) from price_observations;
    in una riga se il problema è il sito, la pagina o la configurazione. Per
    indagare senza salvare nulla c'è `POST /api/scrape`, che restituisce lo
    stesso `debug` completo.
-4. **Refresh manuale** su un prodotto esistente. Se il prezzo letto non è
+4. **Controlla il prezzo, non solo che ci sia un prezzo.** Apri la pagina
+   dello store e confronta. Un prezzo assente il motore lo dichiara; un prezzo
+   *sbagliato* no — è il solo guasto che non si annuncia da sé. Vale soprattutto
+   su Amazon, dove la pagina contiene decine di prezzi che non sono quello del
+   prodotto.
+5. **Refresh manuale** su un prodotto esistente. Se il prezzo letto non è
    attendibile vedrai «Aggiornato, ma il prezzo letto non è attendibile»: il
    prezzo precedente resta, ed è il comportamento corretto.
-5. **Segnala un prezzo sbagliato** con il pulsante nella pagina prodotto. Poi
+6. **Segnala un prezzo sbagliato** con il pulsante nella pagina prodotto. Poi
    verifica che la ricetta sia andata in quarantena:
    ```sql
    select domain, status from scrape_recipes where status = 'quarantined';
@@ -119,6 +124,10 @@ Tre prefissi stabili, tutti grep-abili dai log di Netlify:
 - `[Scraper] Browser avviato in Nms, restano Mms per navigare` — la riga da
   cui si vede se il budget è dimensionato. Su Lambda l'avvio costa 4-5 secondi:
   se `M` è vicino a zero, il tier 1 non ha spazio per lavorare.
+- `[Pipeline] Prezzo dalla ricetta per fallback` — la strategia principale di
+  quel dominio ha smesso di funzionare e ha risposto un fallback. Il motore
+  esegue comunque la scoperta per confronto, ma la riga va guardata: è il
+  segnale che la pagina è cambiata.
 - `[Scraper] La ricetta del dominio chiede il browser: salto il tier 0` — su
   quel dominio la GET viene rifiutata, e la ricetta lo registra nel campo
   `transport`. Sono ~700 ms restituiti al browser a ogni controllo.
@@ -152,6 +161,7 @@ accettazione per dominio? Si ricava contando le righe `[Metric]` con
 | `reason: "navigazione_troncata"` con `navigationTimeoutMs` basso | `diagnostics.suggestedBudgetMs` | stesso problema visto da un altro lato: il browser è partito ma con pochi secondi per navigare |
 | 422 `LOW_CONFIDENCE` con `diagnostics.htmlBytes` alto e `extractors` tutti a `:0` | `diagnostics.pageTitle` | la pagina è arrivata intera ma nessun estrattore ci ha trovato un prodotto: probabilmente non è una scheda prodotto, o è un listing |
 | Molti `Tier 0 sotto soglia` su un dominio | `[Scraper]` nei log | la ricetta di quel dominio non regge sull'HTML statico: il prezzo arriva da JavaScript |
+| **Un prezzo plausibile ma sbagliato**, con `tracking_health = 'healthy'` | `select price, confidence from price_observations where product_id = '…' order by observed_at desc` | è il guasto più pericoloso, perché non si annuncia. Di solito è un selettore CSS senza ambito che pesca il prezzo di uno sponsorizzato o di un correlato. Cerca `[Pipeline] Prezzo dalla ricetta per fallback` nei log: significa che la strategia principale ha smesso di funzionare |
 
 ## 6. Come tornare indietro
 
