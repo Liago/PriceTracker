@@ -99,7 +99,10 @@ describe('scrapeProduct - quando il tier 0 non basta', () => {
 			budgetMs: 1500,
 		});
 
-		await expect(promise).rejects.toMatchObject({ code: BUDGET_EXCEEDED, reason: 'budget_esaurito' });
+		// «Non c'era tempo per iniziare» e «ci ho provato e il tempo e' finito»
+		// sono due cose diverse: solo la prima e' un problema di configurazione,
+		// e solo nella seconda il sito e' stato davvero contattato.
+		await expect(promise).rejects.toMatchObject({ code: BUDGET_EXCEEDED, reason: 'budget_insufficiente' });
 		// Il punto: fallisce in fretta, invece di lasciarsi troncare dal proxy.
 		expect(Date.now() - started).toBeLessThan(2000);
 	});
@@ -209,20 +212,54 @@ describe('browserReachability - i tre gradi, non due', () => {
  * settecento millisecondi su novemila di budget.
  */
 describe('scrapeProduct - la ricetta dice con quale trasporto si legge', () => {
-	it('con transport "browser" il tier 0 non viene nemmeno tentato', async () => {
+	it('con transport "browser", e budget per usarlo, la GET si salta', () => {
+		const { shouldSkipTier0, browserBudgetNeeded } = scraperModule;
+		const recipe = { transport: 'browser', fields: {} };
+
+		expect(shouldSkipTier0({
+			recipe, allowBrowser: true, remainingMs: browserBudgetNeeded() + 1000,
+		})).toBe(true);
+	});
+
+	it('ma non si salta se al browser non ci si arriva', () => {
+		const { shouldSkipTier0, browserBudgetNeeded } = scraperModule;
+		const recipe = { transport: 'browser', fields: {} };
+
+		// Budget insufficiente: meglio una lettura incerta che nessuna lettura.
+		expect(shouldSkipTier0({
+			recipe, allowBrowser: true, remainingMs: browserBudgetNeeded() - 1,
+		})).toBe(false);
+
+		// Browser non consentito: idem.
+		expect(shouldSkipTier0({ recipe, allowBrowser: false, remainingMs: 60000 })).toBe(false);
+	});
+
+	it('con transport http la GET resta sempre la prima scelta', () => {
+		const { shouldSkipTier0 } = scraperModule;
+
+		expect(shouldSkipTier0({ recipe: { transport: 'http' }, allowBrowser: true, remainingMs: 60000 })).toBe(false);
+		expect(shouldSkipTier0({ recipe: null, allowBrowser: true, remainingMs: 60000 })).toBe(false);
+	});
+
+	it('ma se al browser non ci si arriva, la GET si tenta comunque', async () => {
+		// La regressione che questo test blinda: guardando solo «il browser e'
+		// permesso» invece di «c'e' il tempo di avviarlo», su un dominio con
+		// transport 'browser' e budget eroso non si tentava NULLA - ne' GET ne'
+		// browser - e l'errore dava la colpa alla lentezza di un sito mai
+		// contattato.
 		let tentato = false;
-		const impl = async () => { tentato = true; return { ok: false, reason: 'x', durationMs: 1 }; };
+		const impl = async () => { tentato = true; return { ok: false, reason: 'timeout', durationMs: 1 }; };
 
 		await expect(scrapeProduct(BACKMARKET_URL, {
 			fetchHtmlImpl: impl,
 			recipe: { transport: 'browser', fields: {} },
-			budgetMs: 1200, // troppo poco per il browser: fallisce subito
+			budgetMs: 1200, // il browser non e' alla portata
 		})).rejects.toMatchObject({ code: BUDGET_EXCEEDED });
 
-		expect(tentato).toBe(false);
+		expect(tentato).toBe(true);
 	});
 
-	it('ma se il browser non e’ disponibile il tier 0 si tenta comunque', async () => {
+	it('e se il browser non e’ proprio consentito, il tier 0 resta la strada', async () => {
 		// Meglio una lettura HTTP incerta che nessuna lettura: il transport e'
 		// un'indicazione di costo, non un divieto.
 		const data = await scrapeProduct(BACKMARKET_URL, {
@@ -255,7 +292,7 @@ describe('scrapeProduct - l’errore dice a che tier si e’ arrivati', () => {
 			budgetMs: 1100,
 		});
 
-		await expect(promise).rejects.toMatchObject({ tier: 0, reason: 'budget_esaurito' });
+		await expect(promise).rejects.toMatchObject({ tier: 0, reason: 'budget_insufficiente' });
 	});
 
 	it('anche un tentativo fallito riporta la propria durata', async () => {
@@ -288,9 +325,11 @@ describe('quando il sito serve una sfida anche al browser', () => {
 		expect(retryDelay(new Error('net::ERR_CONNECTION_RESET'), 1)).toBeGreaterThan(challenge);
 	});
 
-	it('a freddo la soglia resta la stima prudente', () => {
-		// Nessun avvio ancora osservato in questo processo: la stima tarata
-		// sull'avvio a freddo è quella giusta, ed è il caso in cui è giusta.
-		expect(browserBudgetNeeded()).toBe(8000);
+	it('la soglia copre sempre navigazione e riserva', () => {
+		// Il valore esatto dipende da quanto e' costato l'ultimo avvio
+		// osservato in questo processo, che cambia; la proprieta' che deve
+		// valere sempre e' che ci sia spazio per navigare e per rispondere,
+		// oltre al lancio.
+		expect(browserBudgetNeeded()).toBeGreaterThanOrEqual(4000 + 2500);
 	});
 });

@@ -87,6 +87,13 @@ const FAILURES = Object.freeze({
 		status: 504,
 		message: 'La pagina ha impiegato troppo tempo a rispondere',
 	},
+	// Il sito non e' stato contattato affatto: dargli la colpa della lentezza
+	// sarebbe un'affermazione su qualcosa che non e' mai successo. Il 503 dice
+	// che il servizio non era in condizione di provarci, ed e' la verita'.
+	budget_insufficiente: {
+		status: 503,
+		message: "Non c'era tempo per leggere la pagina: il servizio è configurato con un budget troppo stretto",
+	},
 	budget_speso_nell_avvio: {
 		status: 504,
 		message: "L'avvio del browser ha consumato il tempo disponibile prima di poter caricare la pagina",

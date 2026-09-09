@@ -585,6 +585,27 @@ function isRetryable(error) {
 }
 
 /**
+ * Si puo' saltare la GET e andare diritti al browser?
+ *
+ * Funzione pura perche' la decisione va potuta verificare senza avviare
+ * Chromium: la prima versione viveva dentro il ciclo e l'unico modo di
+ * provarla era eseguirla, il che rendeva il test lento e, soprattutto,
+ * dipendente da cose che col merito della decisione non c'entravano.
+ *
+ * @param {object} args
+ * @param {object|null} args.recipe
+ * @param {boolean} args.allowBrowser
+ * @param {number} args.remainingMs
+ * @returns {boolean}
+ */
+function shouldSkipTier0({ recipe, allowBrowser, remainingMs }) {
+	if (recipe?.transport !== 'browser') return false;
+	// Il transport e' un'indicazione di costo, non un divieto: si salta la GET
+	// solo se al browser ci si arriva davvero.
+	return allowBrowser && remainingMs >= browserBudgetNeeded();
+}
+
+/**
  * Scarica e interpreta una pagina prodotto.
  *
  * @param {string} url
@@ -629,14 +650,30 @@ async function scrapeProduct(url, options = {}) {
 	//
 	// La ricetta del dominio dice gia' con quale trasporto quel sito si legge.
 	// Su un dominio che rifiuta le richieste senza browser la GET e' tempo
-	// tolto al browser - in produzione settecento millisecondi su novemila, per
-	// riprendersi lo stesso 403 di ogni volta - e il campo esisteva apposta.
+	// tolto al browser - settecento millisecondi per riprendersi lo stesso 403
+	// di ogni volta - e il campo esisteva apposta.
+	//
+	// Ma saltarla ha senso SOLO se al browser ci si arriva davvero. La prima
+	// versione di questo controllo guardava `allowBrowser`, che dice se il
+	// browser e' permesso, non se c'e' il tempo di avviarlo: su un dominio con
+	// transport 'browser' e un budget gia' eroso dal preambolo il risultato era
+	// zero tentativi, ne' GET ne' browser, e un errore in zero millisecondi che
+	// dava la colpa alla lentezza di un sito mai contattato.
+	//
+	// Il transport resta cio' che e' sempre stato: un'indicazione di costo, non
+	// un divieto. Se il browser non e' alla portata, una lettura incerta vale
+	// piu' di nessuna lettura.
+	const skipTier0 = shouldSkipTier0({ recipe, allowBrowser, remainingMs: remaining() });
 	const recipeWantsBrowser = recipe?.transport === 'browser';
-	if (recipeWantsBrowser && allowBrowser) {
+
+	if (skipTier0) {
 		console.log('[Scraper] La ricetta del dominio chiede il browser: salto il tier 0');
+		tier0Skipped = 'ricetta_richiede_browser';
+	} else if (recipeWantsBrowser) {
+		console.log(`[Scraper] La ricetta chiede il browser ma non e' alla portata (${remaining()}ms): provo comunque la GET`);
 	}
 
-	if (allowHttp && !(recipeWantsBrowser && allowBrowser)) {
+	if (allowHttp && !skipTier0) {
 		const timeoutMs = Math.min(TIER0_TIMEOUT_MS, Math.max(remaining(), 0));
 		if (timeoutMs > 0) {
 			try {
@@ -669,15 +706,22 @@ async function scrapeProduct(url, options = {}) {
 	}
 
 	let lastError = null;
+	let browserAttempts = 0;
 
 	for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
 		if (remaining() < browserBudgetNeeded()) {
 			console.warn(`[Scraper] Budget insufficiente per il browser (${remaining()}ms < ${browserBudgetNeeded()}ms)`);
-			return finish(best, { url, startedAt, tierReached, tier0Skipped, antiBotSuspected, evidence, reason: 'budget_esaurito', lastError });
+			// «Budget esaurito» dopo un tentativo e «budget insufficiente per
+			// iniziarne uno» sono due cose diverse, e solo la seconda merita di
+			// essere raccontata come un problema di configurazione: nel primo
+			// caso il sito e' stato contattato, nel secondo no.
+			const reason = browserAttempts === 0 && best === null ? 'budget_insufficiente' : 'budget_esaurito';
+			return finish(best, { url, startedAt, tierReached, tier0Skipped, antiBotSuspected, evidence, reason, lastError });
 		}
 
 		try {
 			tierReached = 1;
+			browserAttempts++;
 			// Si passa la scadenza, non un timeout: quanto tempo resti davvero
 			// alla navigazione si sa solo dopo aver avviato il browser.
 			const data = await runTier1(url, { ...context, attempt, deadline });
@@ -815,6 +859,7 @@ module.exports = {
 	browserReachable,
 	browserReachability,
 	browserBudgetNeeded,
+	shouldSkipTier0,
 	retryDelay,
 	inspectResult,
 	BUDGET_EXCEEDED,
