@@ -23,6 +23,8 @@ ordine, e di cosa guardare.
 | `SCRAPE_TIER0_THRESHOLD` | opzionale, default 0.6. Sotto questa confidenza il tier 0 non basta e si sale al browser |
 | `SCRAPE_TIER0_TIMEOUT_MS` | opzionale, default 6000 |
 | `SCRAPE_BROWSER_MIN_MS` | opzionale, default 8000. Tempo residuo sotto il quale Chromium non viene nemmeno avviato |
+| `SCRAPE_NAVIGATION_MIN_MS` | opzionale, default 4000. Sotto questo residuo **dopo l'avvio** del browser la navigazione non parte: si troncherebbe |
+| `SCRAPE_RESPONSE_RESERVE_MS` | opzionale, default 2500. Margine lasciato a chiusura, scritture e risposta |
 
 > **Il vincolo che decide tutto.** La disponibilità del browser ha tre gradi,
 > e il motore li stampa da sé al primo caricamento:
@@ -40,6 +42,13 @@ ordine, e di cosa guardare.
 > se una risposta ti è arrivata con 10800 ms, il limite è più alto), alza il
 > budget lasciando ~1s di margine. Un tier 1 con poco tempo è peggio di nessun
 > tier 1: produce letture troncate.
+>
+> **Non serve stimarlo a mano.** Quando il motore si ferma per mancanza di
+> tempo, la risposta porta `diagnostics.suggestedBudgetMs`: il budget che
+> sarebbe servito, calcolato sull'avvio del browser misurato in quella
+> invocazione. È il numero da mettere in configurazione. Il conto è
+> `tier 0 + avvio Chromium (≈4-5s su Lambda) + navigazione + riserva`: sotto i
+> **15 secondi** il tier 1 non ha spazio per lavorare.
 
 **Migrazioni.** Vanno applicate *prima* del deploy del codice: il codice nuovo
 usa tabelle che le migrazioni creano.
@@ -107,6 +116,12 @@ Tre prefissi stabili, tutti grep-abili dai log di Netlify:
 - `[Scraper] Tier 0: pagina di sfida` — il sito ha risposto con una verifica
   di sicurezza (Cloudflare, DataDome, PerimeterX…) al posto della pagina. La
   riga riporta il fornitore, il titolo ricevuto e i byte.
+- `[Scraper] Browser avviato in Nms, restano Mms per navigare` — la riga da
+  cui si vede se il budget è dimensionato. Su Lambda l'avvio costa 4-5 secondi:
+  se `M` è vicino a zero, il tier 1 non ha spazio per lavorare.
+- `[Scraper] La ricetta del dominio chiede il browser: salto il tier 0` — su
+  quel dominio la GET viene rifiutata, e la ricetta lo registra nel campo
+  `transport`. Sono ~700 ms restituiti al browser a ogni controllo.
 - `[Scraper] Tier 1: pagina non utilizzabile (navigazione_troncata)` — il
   browser è partito ma la navigazione non è arrivata in fondo nel tempo
   concesso, e quel che restava era il guscio vuoto del documento. È il segnale
@@ -133,6 +148,8 @@ accettazione per dominio? Si ricava contando le righe `[Metric]` con
 | `SCRAPE_INCOMPLETE` con status **503** | `diagnostics.reason` | il sito ci ha rifiutati: `sfida_*` (verifica di sicurezza) o `bloccato_dal_sito_403` (status anti-bot sulla GET). Il budget non c'entra |
 | `SCRAPE_INCOMPLETE` con status **504** | `diagnostics.navigationTimedOut` | questione di tempo: `navigazione_troncata` (il browser è partito ma non ha finito di caricare) o `budget_esaurito`. **Qui alzare il budget serve** |
 | `SCRAPE_INCOMPLETE` con status **502** | `diagnostics.htmlBytes` | il sito ha risposto con una pagina vuota: `nessun_candidato` o `pagina_troppo_piccola` |
+| `reason: "budget_speso_nell_avvio"` | `diagnostics.browserStartMs` | l'avvio di Chromium ha consumato il budget prima che si potesse caricare la pagina. Metti in configurazione `diagnostics.suggestedBudgetMs` |
+| `reason: "navigazione_troncata"` con `navigationTimeoutMs` basso | `diagnostics.suggestedBudgetMs` | stesso problema visto da un altro lato: il browser è partito ma con pochi secondi per navigare |
 | 422 `LOW_CONFIDENCE` con `diagnostics.htmlBytes` alto e `extractors` tutti a `:0` | `diagnostics.pageTitle` | la pagina è arrivata intera ma nessun estrattore ci ha trovato un prodotto: probabilmente non è una scheda prodotto, o è un listing |
 | Molti `Tier 0 sotto soglia` su un dominio | `[Scraper]` nei log | la ricetta di quel dominio non regge sull'HTML statico: il prezzo arriva da JavaScript |
 
@@ -152,6 +169,12 @@ previsto:
   ```sql
   update scrape_recipes set status = 'deprecated' where domain = 'shop-problematico.it';
   ```
+- **Dire che un dominio rifiuta le richieste senza browser**, così il motore
+  smette di sprecarci il tier 0:
+  ```sql
+  update scrape_recipes set transport = 'browser' where domain = 'backmarket.it';
+  ```
+  Il contrario (`transport = 'http'`) rimette la GET come prima scelta.
   Il motore torna alla scoperta completa per quel dominio.
 - **Bloccare un dominio**:
   ```sql
