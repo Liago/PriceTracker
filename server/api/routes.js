@@ -161,6 +161,11 @@ function describeError(error) {
 		navigationTimedOut: evidence.navigationTimedOut ?? null,
 		navigationTimeoutMs: evidence.navigationTimeoutMs ?? null,
 		browserStartMs: evidence.browserStartMs ?? null,
+		// Quale sfida ci ha fermati: senza il nome del fornitore non si sa se
+		// il caso è affrontabile (un JS challenge che si risolve aspettando) o
+		// se è un blocco per indirizzo, dove nessuna regolazione aiuta.
+		challengeType: evidence.challengeType || null,
+		challengeIndicators: evidence.challengeIndicators || null,
 		// Quando il motore sa quanto budget gli sarebbe servito, lo dice: e' un
 		// numero osservato, ed e' esattamente cio' che va in configurazione.
 		suggestedBudgetMs: evidence.suggestedBudgetMs ?? null,

@@ -25,6 +25,8 @@ ordine, e di cosa guardare.
 | `SCRAPE_BROWSER_MIN_MS` | opzionale, default 8000. Tempo residuo sotto il quale Chromium non viene nemmeno avviato |
 | `SCRAPE_NAVIGATION_MIN_MS` | opzionale, default 4000. Sotto questo residuo **dopo l'avvio** del browser la navigazione non parte: si troncherebbe |
 | `SCRAPE_RESPONSE_RESERVE_MS` | opzionale, default 2500. Margine lasciato a chiusura, scritture e risposta |
+| `SCRAPE_CHALLENGE_RETRY_MS` | opzionale, default 500. Pausa prima di riprovare con un altro User-Agent dopo una sfida |
+| `PROXY_LIST` | **la leva che conta sui domini che ci bloccano per indirizzo.** Vuota per default; il codice la supporta già (`utils/proxyManager`) |
 
 > **Il vincolo che decide tutto.** La disponibilità del browser ha tre gradi,
 > e il motore li stampa da sé al primo caricamento:
@@ -154,7 +156,8 @@ accettazione per dominio? Si ricava contando le righe `[Metric]` con
 | Worker che non partono | log Netlify | manca `SUPABASE_SERVICE_ROLE_KEY` |
 | 504 con una pagina HTML («Inactivity Timeout») al posto di JSON | log Netlify, durata della function | la richiesta ha superato il timeout della piattaforma: `SCRAPE_REQUEST_BUDGET_MS` è troppo alto per il limite del tuo piano |
 | 504 JSON con `code: SCRAPE_BUDGET_EXCEEDED` | il campo `reason` nella risposta | è il motore che si ferma per tempo, non il proxy che tronca. `budget_esaurito`: la pagina è lenta; `antiBotSuspected: true`: il sito rifiuta la lettura automatica |
-| `SCRAPE_INCOMPLETE` con status **503** | `diagnostics.reason` | il sito ci ha rifiutati: `sfida_*` (verifica di sicurezza) o `bloccato_dal_sito_403` (status anti-bot sulla GET). Il budget non c'entra |
+| `SCRAPE_INCOMPLETE` con status **503** | `diagnostics.reason` e `diagnostics.challengeType` | il sito ci ha rifiutati: `sfida_*` (verifica di sicurezza) o `bloccato_dal_sito_403` (status anti-bot sulla GET). Il budget non c'entra |
+| **403 sulla GET *e* sfida al browser, sullo stesso dominio** | `diagnostics.challengeType` | il sito non sta valutando come chiediamo la pagina, sta valutando **da dove**: l'indirizzo delle function è un datacenter noto. Nessuna regolazione di header, budget o tentativi lo cambia — serve `PROXY_LIST` con proxy residenziali |
 | `SCRAPE_INCOMPLETE` con status **504** | `diagnostics.navigationTimedOut` | questione di tempo: `navigazione_troncata` (il browser è partito ma non ha finito di caricare) o `budget_esaurito`. **Qui alzare il budget serve** |
 | `SCRAPE_INCOMPLETE` con status **502** | `diagnostics.htmlBytes` | il sito ha risposto con una pagina vuota: `nessun_candidato` o `pagina_troppo_piccola` |
 | `reason: "budget_speso_nell_avvio"` | `diagnostics.browserStartMs` | l'avvio di Chromium ha consumato il budget prima che si potesse caricare la pagina. Metti in configurazione `diagnostics.suggestedBudgetMs` |
