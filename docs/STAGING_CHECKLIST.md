@@ -26,7 +26,15 @@ ordine, e di cosa guardare.
 | `SCRAPE_NAVIGATION_MIN_MS` | opzionale, default 4000. Sotto questo residuo **dopo l'avvio** del browser la navigazione non parte: si troncherebbe |
 | `SCRAPE_RESPONSE_RESERVE_MS` | opzionale, default 2500. Margine lasciato a chiusura, scritture e risposta |
 | `SCRAPE_CHALLENGE_RETRY_MS` | opzionale, default 500. Pausa prima di riprovare con un altro User-Agent dopo una sfida |
-| `PROXY_LIST` | **la leva che conta sui domini che ci bloccano per indirizzo.** Vuota per default; il codice la supporta già (`utils/proxyManager`) |
+| `PROXY_LIST` | **la leva che conta sui domini che ci bloccano per indirizzo.** Vuota per default; il codice la supporta già (`utils/proxyManager`), ma **oggi solo per il tier 1**: la GET del tier 0 esce comunque dall'indirizzo delle function |
+
+> **Prima di comprare proxy, misurali.** «Datacenter» e «residenziale» dicono
+> una probabilità, non una legge: un intervallo o è accettato da quel sito o
+> non lo è. `PROXY_LIST="..." npm run check:proxy -- <url>` manda gli stessi
+> header del tier 0 attraverso ogni proxy configurato e dice, per ciascuno, se
+> è passato. Senza URL prova i tre domini che in produzione ci hanno rifiutati.
+> Due minuti di verifica valgono più di qualsiasi stima quando la decisione è
+> una spesa.
 
 > **Il vincolo che decide tutto.** La disponibilità del browser ha tre gradi,
 > e il motore li stampa da sé al primo caricamento:
