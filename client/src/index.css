@@ -1,13 +1,201 @@
 @import "tailwindcss";
 
-body {
-  @apply bg-gray-900 text-white antialiased;
-  background: radial-gradient(circle at top left, #1e293b 0%, #0f172a 100%);
-  min-height: 100vh;
+/*
+ * Tema "Claude look" (github.com/rubenhassid1/grenade, style kit).
+ *
+ * I token vivono come variabili CSS su :root e vengono ridefiniti per il tema
+ * scuro due volte: una per chi segue il sistema (prefers-color-scheme) e una
+ * per chi ha scelto esplicitamente "scuro" dallo switch. Tailwind li legge
+ * tramite @theme inline, così le classi (bg-card, text-muted-foreground, ...)
+ * cambiano da sole quando cambia il tema.
+ */
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --bg: #fff;
+  --soft: #f9f9f9;
+  --card: #fff;
+  --text: rgba(0, 0, 0, 0.9);
+  --text-2: rgba(0, 0, 0, 0.6);
+  --text-3: rgba(0, 0, 0, 0.47);
+  --line: rgba(0, 0, 0, 0.12);
+  --shadow: 0 4px 20px rgba(0, 0, 0, 0.075);
+  --clay: #d97757;
+  --clay-strong: #c6613f;
+  --good: #006c10;
+  --good-bg: rgba(16, 161, 34, 0.14);
+  --bad: #a42528;
+  --bad-bg: rgba(220, 60, 61, 0.12);
+  --watch: #794c02;
+  --watch-bg: rgba(251, 179, 21, 0.16);
+  --overlay: rgba(0, 0, 0, 0.4);
+
+  --serif: Georgia, "Times New Roman", serif;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  /* Curve di Emil Kowalski: ease-out deciso per ciò che entra, mai ease-in. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151515;
+    --soft: #0b0b0b;
+    --card: #1f1f1f;
+    --text: rgba(255, 255, 255, 0.93);
+    --text-2: rgba(255, 255, 255, 0.57);
+    --text-3: rgba(255, 255, 255, 0.4);
+    --line: rgba(255, 255, 255, 0.12);
+    --shadow: none;
+    --good: #53c556;
+    --bad: #f17778;
+    --watch: #e49c06;
+    --overlay: rgba(0, 0, 0, 0.6);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #151515;
+  --soft: #0b0b0b;
+  --card: #1f1f1f;
+  --text: rgba(255, 255, 255, 0.93);
+  --text-2: rgba(255, 255, 255, 0.57);
+  --text-3: rgba(255, 255, 255, 0.4);
+  --line: rgba(255, 255, 255, 0.12);
+  --shadow: none;
+  --good: #53c556;
+  --bad: #f17778;
+  --watch: #e49c06;
+  --overlay: rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+
+@theme inline {
+  /* Nomi shadcn, valori dello style kit: clay è il primary. */
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-soft: var(--soft);
+  --color-card: var(--card);
+  --color-card-foreground: var(--text);
+  --color-muted-foreground: var(--text-2);
+  --color-subtle: var(--text-3);
+  --color-border: var(--line);
+  --color-input: var(--line);
+  --color-ring: var(--clay);
+  --color-primary: var(--clay-strong);
+  --color-primary-foreground: #fff;
+  --color-clay: var(--clay);
+  --color-good: var(--good);
+  --color-good-bg: var(--good-bg);
+  --color-bad: var(--bad);
+  --color-bad-bg: var(--bad-bg);
+  --color-watch: var(--watch);
+  --color-watch-bg: var(--watch-bg);
+  --color-destructive: var(--bad);
+  --color-overlay: var(--overlay);
+
+  --font-serif: var(--serif);
+  --font-sans: var(--sans);
+
+  /* Solo cinque dimensioni di testo. */
+  --text-num: 40px;
+  --text-num--line-height: 1;
+  --text-title: 32px;
+  --text-title--line-height: 1.2;
+  --text-heading: 22px;
+  --text-heading--line-height: 1.3;
+  --text-body: 16px;
+  --text-body--line-height: 1.55;
+  --text-label: 13px;
+  --text-label--line-height: 1.4;
+
+  --radius-card: 14px;
+  --radius-control: 10px;
+  --shadow-card: var(--shadow);
+
+  --ease-out-strong: var(--ease-out);
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--line);
+  }
+
+  html {
+    background: var(--bg);
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.55 var(--sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--serif);
+    font-weight: 400;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  /* Le superfici del browser portano il design anche loro. */
+  ::selection {
+    background: color-mix(in srgb, var(--clay) 28%, transparent);
+    color: var(--text);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--clay);
+    outline-offset: 2px;
+  }
+
+  input,
+  select,
+  textarea {
+    caret-color: var(--clay);
+    accent-color: var(--clay-strong);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+  }
+
+  a {
+    text-underline-offset: 3px;
+  }
 }
 
 @layer utilities {
-  .glass {
-    @apply bg-white/10 backdrop-blur-lg border border-white/10;
+  /* Feedback alla pressione: la UI conferma di aver sentito il clic. */
+  .pressable {
+    transition: transform 160ms var(--ease-out);
+  }
+  .pressable:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Chi chiede meno movimento ottiene solo dissolvenze. */
+@media (prefers-reduced-motion: reduce) {
+  .pressable:active:not(:disabled) {
+    transform: none;
   }
 }
