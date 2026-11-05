@@ -153,62 +153,14 @@ describe('saveLearnedRecipe', () => {
 });
 
 describe('recordOutcome', () => {
-	const recipe = (overrides) => ({
-		id: 'r1', domain: 'shop.it', url_pattern: '*', scope: 'domain',
-		status: 'candidate', success_count: 2, failure_count: 0, consecutive_failures: 0,
-		...overrides,
+	it('demanda contatori e promozione a una singola transazione', async () => {
+		const rpc = vi.fn().mockResolvedValue({ data: {status:'active',promoted:true}, error:null });
+		const store = createRecipeStore({ client: {rpc} });
+		expect(await store.recordOutcome({id:'r1',domain:'shop.it'},true)).toEqual({status:'active',promoted:true});
+		expect(rpc).toHaveBeenCalledWith('record_recipe_evaluation',{p_recipe_id:'r1',p_succeeded:true});
 	});
-
-	it('promuove una candidate al terzo successo', async () => {
-		const client = fakeClient({});
-		const store = createRecipeStore({ client });
-
-		const outcome = await store.recordOutcome(recipe(), true);
-		expect(outcome.status).toBe('active');
-		expect(outcome.promoted).toBe(true);
-	});
-
-	it('deprecа la precedente attiva PRIMA di promuovere', async () => {
-		// L'ordine conta: l'indice unico parziale a database rifiuterebbe una
-		// seconda riga attiva.
-		const client = fakeClient({});
-		const store = createRecipeStore({ client });
-
-		await store.recordOutcome(recipe(), true);
-
-		const [primo, secondo] = client.calls.updates;
-		expect(primo.payload.status).toBe('deprecated');
-		expect(primo.filters.status).toBe('active');
-		expect(secondo.payload.status).toBe('active');
-	});
-
-	it('manda in quarantena al terzo fallimento consecutivo', async () => {
-		const client = fakeClient({});
-		const store = createRecipeStore({ client });
-
-		const outcome = await store.recordOutcome(
-			recipe({ status: 'active', consecutive_failures: 2 }), false);
-
-		expect(outcome.status).toBe('quarantined');
-		expect(outcome.quarantined).toBe(true);
-	});
-
-	it('aggiorna i contatori e la data giusta', async () => {
-		const client = fakeClient({});
-		const store = createRecipeStore({ client });
-
-		await store.recordOutcome(recipe({ status: 'active', success_count: 5 }), true);
-		const update = client.calls.updates[0].payload;
-
-		expect(update.success_count).toBe(6);
-		expect(update.consecutive_failures).toBe(0);
-		expect(update.last_success_at).toBeTruthy();
-		expect(update.last_failure_at).toBeUndefined();
-	});
-
-	it('non fa nulla senza ricetta o senza client', async () => {
-		const store = createRecipeStore({ client: fakeClient({}) });
-		await expect(store.recordOutcome(null, true)).resolves.toBeTruthy();
-		await expect(createRecipeStore({}).recordOutcome(recipe(), true)).resolves.toBeTruthy();
+	it('propaga gli errori di database', async () => {
+		const store = createRecipeStore({client:{rpc:async()=>({error:{message:'denied'}})}});
+		await expect(store.recordOutcome({id:'r1'},true)).rejects.toThrow('denied');
 	});
 });

@@ -1,3 +1,4 @@
+import { useLiveRefresh } from '../lib/useLiveRefresh'
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { AnimatePresence, motion } from 'motion/react'
@@ -5,7 +6,7 @@ import { Trash2, Check, Bell } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import type { NotificationRow } from '../lib/types'
-import { formatDateTime } from '../lib/format'
+import { formatDateTime, priceText } from '../lib/format'
 import { Card } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -25,7 +26,7 @@ export default function Notifications() {
     if (!user) return
     let query = supabase
       .from('notifications')
-      .select('*, products(name, image, url)')
+      .select('*, products(name, image, url, currency)')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 
@@ -45,6 +46,8 @@ export default function Notifications() {
     const timer = setTimeout(fetchNotifications, 0)
     return () => clearTimeout(timer)
   }, [fetchNotifications])
+
+  useLiveRefresh('notifications', () => { void fetchNotifications() }, `user_id=eq.${user?.id}`)
 
   const chooseFilter = (value: Filter) => {
     if (value === filter) return
@@ -193,8 +196,8 @@ export default function Notifications() {
                       </Link>
                       {notif.old_price && notif.new_price && (
                         <p className="mt-1 tabular-nums">
-                          Da <span className="text-muted-foreground line-through">€{notif.old_price}</span> a{' '}
-                          <strong className="text-heading font-medium">€{notif.new_price}</strong>
+                          Da <span className="text-muted-foreground line-through">{notif.products?.currency || 'EUR'} {priceText(notif.old_price)}</span> a{' '}
+                          <strong className="text-heading font-medium">{notif.products?.currency || 'EUR'} {priceText(notif.new_price)}</strong>
                         </p>
                       )}
                       <p className="mt-1 text-label text-subtle">{formatDateTime(notif.created_at)}</p>

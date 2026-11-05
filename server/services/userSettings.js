@@ -62,7 +62,7 @@ function normalizeUserSettings(row) {
 		: DEFAULTS.maxRetries;
 
 	return {
-		priceCheckIntervalMinutes: Math.max(interval, MIN_PRICE_CHECK_INTERVAL_MINUTES),
+		priceCheckIntervalMinutes: clamp(interval, MIN_PRICE_CHECK_INTERVAL_MINUTES, 2880),
 		scrapeDelayMs: clamp(delay, MIN_SCRAPE_DELAY_MS, MAX_SCRAPE_DELAY_MS),
 		maxRetries: retries,
 		emailNotifications: row.email_notifications ?? DEFAULTS.emailNotifications,

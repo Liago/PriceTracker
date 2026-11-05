@@ -7,6 +7,7 @@
  * completa costa, la riapplicazione no.
  */
 
+const { isStruck, isHidden, isOffTopic, hasAccessoryAncestor } = require('../extract/domHeuristics');
 const { candidate, compact } = require('../extract/candidate');
 const { parsePrice } = require('../normalize/price');
 const { normalizeCurrency } = require('../normalize/currency');
@@ -44,7 +45,9 @@ function normalizeValue(field, raw, context) {
 function runStrategy(spec, doc, context) {
 	switch (spec.strategy) {
 		case 'css': {
-			const node = doc.$(spec.selector).first();
+			const nodes = doc.$(spec.selector).toArray().filter(el => context.field !== 'price' || (!isStruck(doc.$, el) && !isHidden(doc.$, el) && !isOffTopic(doc.$, el) && !hasAccessoryAncestor(doc.$, el)));
+			if (context.field === 'price' && new Set(nodes.map(el => parsePrice(spec.attr ? doc.$(el).attr(spec.attr) : doc.$(el).text())).filter(x => x !== null)).size > 1) return null;
+			const node = doc.$(nodes[0]);
 			if (node.length === 0) return null;
 			const raw = spec.attr ? node.attr(spec.attr) : node.text();
 			return raw === undefined ? null : { raw };
@@ -72,7 +75,7 @@ function runStrategy(spec, doc, context) {
 				context.cache.set(cacheKey, produced);
 			}
 			const found = context.cache.get(cacheKey).find((c) => c.field === context.field);
-			return found ? { raw: found.raw, value: found.value } : null;
+			return found ? { raw: found.raw, value: found.value, candidate: found } : null;
 		}
 		default:
 			return null;
@@ -119,11 +122,12 @@ function applyRecipe(recipe, doc, options = {}) {
 				value,
 				raw: outcome.raw,
 				source: 'recipe',
-				weight,
+				weight: Math.min(weight, outcome.candidate?.weight ?? ({ meta: 0.65, css: 0.70 }[attempt.strategy] ?? 0.80)),
 				path: attempt.selector || attempt.key || attempt.strategy,
 				evidence: typeof outcome.raw === 'string' ? outcome.raw.slice(0, 60) : String(outcome.raw),
 				locator: attempt,
 				meta: {
+					...outcome.candidate?.meta,
 					recipeId: recipe.id ?? null,
 					recipeVersion: recipe.version ?? null,
 					viaFallback: index > 0,

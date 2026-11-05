@@ -1,15 +1,14 @@
 const nodemailer = require('nodemailer');
 
-// Create reusable transporter object using the default SMTP transport
-const transporter = nodemailer.createTransport({
-	host: process.env.SMTP_HOST || 'smtp.gmail.com',
-	port: process.env.SMTP_PORT || 587,
-	secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
-	auth: {
-		user: process.env.SMTP_USER,
-		pass: process.env.SMTP_PASS,
-	},
-});
+function smtpConfig() {
+	const user = process.env.SMTP_USER || process.env.EMAIL_USER;
+	const pass = process.env.SMTP_PASS || process.env.EMAIL_PASS;
+	if (!user || !pass) throw new Error('SMTP non configurato: email mantenuta in coda');
+	return { host: process.env.SMTP_HOST || 'smtp.gmail.com', port: Number(process.env.SMTP_PORT || 587),
+		secure: process.env.SMTP_SECURE === 'true', auth: { user, pass },
+		connectionTimeout: 5000, greetingTimeout: 5000, socketTimeout: 8000 };
+}
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 /**
  * Send an email
@@ -19,32 +18,12 @@ const transporter = nodemailer.createTransport({
  * @param {string} options.html - HTML content
  * @returns {Promise<Object>} - Nodemailer info
  */
-async function sendEmail({ to, subject, html }) {
-	if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-		console.log('[Email Service] SMTP credentials not found. simulating email send:');
-		console.log(`To: ${to}`);
-		console.log(`Subject: ${subject}`);
-		console.log('--- Content ---');
-		// console.log(html); 
-		console.log('--- End Content ---');
-		return { messageId: 'mock-id', response: 'Simulated success' };
-	}
-
-	try {
-		const info = await transporter.sendMail({
-			from: process.env.SMTP_FROM || '"PriceTracker" <noreply@pricetracker.com>',
-			to,
-			subject,
-			html,
-		});
-
-		console.log('[Email Service] Message sent: %s', info.messageId);
-		return info;
-	} catch (error) {
-		console.error('[Email Service] Error sending email:', error);
-		// Don't throw, just log. We don't want to crash the scraper/tracker loop.
-		return null;
-	}
+async function sendEmail({ to, subject, html, messageId }) {
+	const config = smtpConfig();
+	const transporter = nodemailer.createTransport(config);
+	const info = await transporter.sendMail({ from: process.env.SMTP_FROM || config.auth.user, to, subject, html, messageId });
+	if (!info.accepted?.length) throw new Error('Il server SMTP non ha accettato il destinatario');
+	return info;
 }
 
 /**
@@ -54,7 +33,9 @@ async function sendEmail({ to, subject, html }) {
  * @param {number} oldPrice - Previous price
  * @param {number} newPrice - New (lower) price
  */
-async function sendPriceDropNotification(userEmail, product, oldPrice, newPrice) {
+async function sendPriceDropNotification(userEmail, rawProduct, oldPrice, newPrice, notificationId) {
+	const product = Object.fromEntries(Object.entries(rawProduct).map(([k,v]) => [k, escapeHtml(v)]));
+	product.name ||= "Prodotto monitorato";
 	const savings = (oldPrice - newPrice).toFixed(2);
 	const currency = product.currency || 'EUR';
 
@@ -88,7 +69,7 @@ async function sendPriceDropNotification(userEmail, product, oldPrice, newPrice)
     </div>
   `;
 
-	return sendEmail({ to: userEmail, subject, html });
+	return sendEmail({ to: userEmail, subject, html, messageId: notificationId ? `<${notificationId}@pricetracker.local>` : undefined });
 }
 
 module.exports = {

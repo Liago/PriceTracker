@@ -77,7 +77,7 @@ describe('enqueueDue', () => {
 		// L'indice unico a database impedisce il doppio accodamento: qui si
 		// verifica che il fallimento di una riga non fermi le altre.
 		const client = fakeClient({
-			insertError: (row) => (row.product_id === 'a' ? { message: 'duplicate key' } : null),
+			insertError: (row) => (row.product_id === 'a' ? { message: 'duplicate key', code: '23505' } : null),
 		});
 		const queue = createJobQueue({ client });
 

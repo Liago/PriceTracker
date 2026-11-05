@@ -95,10 +95,10 @@ describe('il fast path non si fida di un prezzo arrivato per fallback', () => {
 		// in gioco significa che la pagina e' cambiata, ed e' il momento peggiore
 		// per fermarsi al primo numero trovato.
 		expect(result.usedFastPath).toBe(false);
-		expect(result.extractorsRan.map((e) => e.name)).toContain('jsonld');
+		expect(result.extractorsRan.map((e) => e.name)).toContain('retailer');
 	});
 
-	it('mentre la strategia principale conserva il fast path', () => {
+	it('anche la strategia principale viene verificata', () => {
 		const working = {
 			domain: 'amazon.it',
 			success_count: 50,
@@ -111,7 +111,7 @@ describe('il fast path non si fida di un prezzo arrivato per fallback', () => {
 		const doc = createDocument(amazonPage(), { url: 'https://www.amazon.it/dp/X' });
 		const result = runPipeline(doc, { recipe: working });
 
-		expect(result.usedFastPath).toBe(true);
+		expect(result.usedFastPath).toBe(false);
 		expect(result.result.price).toBe(379.99);
 	});
 });

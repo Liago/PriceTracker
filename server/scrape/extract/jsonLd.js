@@ -107,9 +107,30 @@ function priceFromOffer(offer, basePath) {
 function offersOf(productNode, basePath) {
 	const offers = [];
 	asArray(productNode.offers).forEach((offer, index) => {
-		offers.push({ offer, path: `${basePath}.offers[${index}]` });
+		if (hasType(offer, 'AggregateOffer') && offer.offers) {
+			asArray(offer.offers).forEach((nested, j) => offers.push({ offer: nested, path: `${basePath}.offers[${index}].offers[${j}]` }));
+		} else offers.push({ offer, path: `${basePath}.offers[${index}]` });
 	});
 	return offers;
+}
+
+function resourceUrl(value, base) {
+	try { const u = new URL(typeof value === 'object' ? value?.['@id'] : value, base); u.hash = ''; u.pathname = u.pathname.replace(/\/$/, ''); return u.href; } catch { return null; }
+}
+function selectProduct(products, doc) {
+	if (products.length === 1) return products[0];
+	const urls = new Set([resourceUrl(doc.url), resourceUrl(doc.canonicalUrl(), doc.url)].filter(Boolean));
+	const matched = products.filter(({ node }) => [node.url, node['@id'], node.mainEntityOfPage].some(v => v && urls.has(resourceUrl(v, doc.url))));
+	if (matched.length === 1) return matched[0];
+	const main = products.filter(p => /\.mainEntity(?:\.|$)/.test(p.path));
+	return main.length === 1 ? main[0] : null;
+}
+function selectOffers(offers, doc) {
+	if (offers.length <= 1) return offers;
+	const exact = offers.filter(({ offer }) => offer?.url && resourceUrl(offer.url, doc.url) === resourceUrl(doc.url));
+	if (exact.length === 1) return exact;
+	// Equal prices alone do not establish equal sellers, availability or variants.
+	return [];
 }
 
 /**
@@ -131,7 +152,9 @@ function extract(doc) {
 
 	// Il primo Product trovato e' quello della pagina; gli altri sono in genere
 	// prodotti correlati o breadcrumb, e vengono ignorati per i campi scalari.
-	const { node, path } = products[0];
+	const selected = selectProduct(products, doc);
+	if (!selected) return [];
+	const { node, path } = selected;
 
 	if (node.name) {
 		candidates.push(candidate({
@@ -180,7 +203,7 @@ function extract(doc) {
 		}
 	}
 
-	for (const { offer, path: offerPath } of offersOf(node, path)) {
+	for (const { offer, path: offerPath } of selectOffers(offersOf(node, path), doc)) {
 		if (!offer || typeof offer !== 'object') continue;
 
 		const priceInfo = priceFromOffer(offer, offerPath);

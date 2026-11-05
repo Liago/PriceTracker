@@ -1,3 +1,4 @@
+import { useLiveRefresh } from '../lib/useLiveRefresh'
 import { useState, useEffect, useMemo, useCallback, type MouseEvent } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
 import { motion } from 'motion/react'
@@ -123,6 +124,8 @@ export default function Dashboard() {
 
   // Una sola lettura leggera di tutti i prodotti: da qui escono sia l'elenco
   // dei negozi per il filtro (come prima) sia i quattro numeri in alto.
+  const [liveVersion, setLiveVersion] = useState(0)
+  useLiveRefresh('products', () => { void fetchProducts(); setLiveVersion(v => v + 1) })
   const [summary, setSummary] = useState<SummaryRow[]>([])
   useEffect(() => {
     const fetchSummary = async () => {
@@ -132,7 +135,7 @@ export default function Dashboard() {
       setSummary((data as SummaryRow[]) || [])
     }
     fetchSummary()
-  }, [refreshTrigger]) // Update stores on refresh too
+  }, [refreshTrigger, liveVersion]) // Background checks refresh totals too
 
   const uniqueStores = useMemo(
     () => [...new Set(summary.map((p) => p.store).filter((s): s is string => Boolean(s)))],

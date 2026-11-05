@@ -322,7 +322,7 @@ async function runTier0(url, { recipe, lastKnownPrice, timeoutMs, fetchHtmlImpl 
 	}
 
 	const data = interpret(fetched.html, {
-		url,
+		url: fetched.url || url,
 		recipe,
 		lastKnownPrice,
 		antiBotDetected: false,
@@ -448,6 +448,15 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline }) {
 			console.warn(`[Scraper] Navigation timeout for ${url} dopo ${navigationTimeoutMs}ms, provo con quel che c'e'`);
 		}
 
+		const readinessBudget = Math.min(2500, deadline - Date.now() - RESPONSE_RESERVE_MS);
+		if (readinessBudget > 200 && typeof page.waitForFunction === 'function') {
+			await page.waitForFunction(() => {
+				if (location.hostname.endsWith('swappie.com')) return Boolean(window.__INITIAL__DATA__?.productPageData?.selectedProduct);
+				if (/amazon\./.test(location.hostname)) return Boolean(document.querySelector('#corePriceDisplay_desktop_feature_div .a-offscreen, #corePrice_feature_div .a-offscreen, #availability'));
+				return Boolean(document.querySelector('script[type="application/ld+json"], [itemprop="price"], [class*="price"]'));
+			}, { timeout: readinessBudget, polling: 150 }).catch(() => {});
+		}
+
 		// Enhanced CAPTCHA detection
 		const captchaResult = await captchaDetector.detect(page);
 		if (captchaResult.detected) {
@@ -492,7 +501,7 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline }) {
 		}
 
 		const data = interpret(html, {
-			url,
+			url: typeof page.url === 'function' ? page.url() : url,
 			recipe,
 			lastKnownPrice,
 			antiBotDetected: captchaResult.detected,
@@ -599,6 +608,7 @@ function isRetryable(error) {
  * @returns {boolean}
  */
 function shouldSkipTier0({ recipe, allowBrowser, remainingMs }) {
+	if (require('../scrape/extract/retailers').retailerOf(`https://${recipe?.domain}`)) return false;
 	if (recipe?.transport !== 'browser') return false;
 	// Il transport e' un'indicazione di costo, non un divieto: si salta la GET
 	// solo se al browser ci si arriva davvero.
@@ -628,6 +638,7 @@ async function scrapeProduct(url, options = {}) {
 		allowBrowser = true,
 		allowHttp = TIER0_ENABLED,
 		fetchHtmlImpl = fetchHtml,
+		maxRetries = MAX_RETRIES - 1,
 	} = normalized;
 
 	const startedAt = Date.now();
@@ -708,7 +719,7 @@ async function scrapeProduct(url, options = {}) {
 	let lastError = null;
 	let browserAttempts = 0;
 
-	for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+	for (let attempt = 0; attempt < Math.min(MAX_RETRIES, Math.max(1, maxRetries + 1)); attempt++) {
 		if (remaining() < browserBudgetNeeded()) {
 			console.warn(`[Scraper] Budget insufficiente per il browser (${remaining()}ms < ${browserBudgetNeeded()}ms)`);
 			// «Budget esaurito» dopo un tentativo e «budget insufficiente per

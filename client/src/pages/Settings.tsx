@@ -52,7 +52,7 @@ export default function Settings() {
       setSettings({
         price_check_interval: data.price_check_interval || 360,
         scrape_delay: data.scrape_delay || 2000,
-        max_retries: data.max_retries || 1,
+        max_retries: data.max_retries ?? 1,
         email_notifications: data.email_notifications ?? true,
       })
     } catch (error) {
@@ -179,9 +179,9 @@ export default function Settings() {
             <NumberField
               id="interval"
               label="Controlla i prezzi ogni (minuti)"
-              hint="Minimo 1 minuto"
-              min={1}
-              max={10080}
+              hint="Minimo 15 minuti. Il controllo può essere rinviato se il negozio non risponde."
+              min={15}
+              max={2880}
               value={settings.price_check_interval}
               onChange={(value) => setSettings({ ...settings, price_check_interval: value })}
             />

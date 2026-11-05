@@ -11,7 +11,7 @@
  */
 
 const { validateRecipe } = require('./schema');
-const { nextRecipeState, domainOf } = require('./learner');
+const { domainOf } = require('./learner');
 
 const DEFAULT_TTL_MS = 60000;
 
@@ -19,10 +19,8 @@ const DEFAULT_TTL_MS = 60000;
  * @param {object} options
  * @param {object} options.client - client Supabase con privilegi service_role
  * @param {number} [options.ttlMs]
- * @param {number} [options.promoteAfter=3]
- * @param {number} [options.quarantineAfter=3]
  */
-function createRecipeStore({ client, ttlMs = DEFAULT_TTL_MS, promoteAfter = 3, quarantineAfter = 3 } = {}) {
+function createRecipeStore({ client, ttlMs = DEFAULT_TTL_MS } = {}) {
 	const cache = new Map();
 
 	const cacheGet = (key) => {
@@ -49,28 +47,24 @@ function createRecipeStore({ client, ttlMs = DEFAULT_TTL_MS, promoteAfter = 3, q
 	 * @param {string} url
 	 * @returns {Promise<object|null>}
 	 */
-	async function getActiveRecipe(url) {
+	function applies(recipe, url, productId) {
+		if (recipe.scope === 'product') return recipe.product_id === productId;
+		if (recipe.scope !== 'url_pattern') return true;
+		const escaped = String(recipe.url_pattern || '*').split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+		return new RegExp(`^${escaped}$`).test(url);
+	}
+	async function getActiveRecipe(url, productId = null) {
 		const domain = domainOf(url);
 		if (!domain || !client) return null;
-
-		const cached = cacheGet(`recipe:${domain}`);
-		if (cached !== undefined) return cached;
-
-		const { data, error } = await client
-			.from('scrape_recipes')
-			.select('*')
-			.eq('domain', domain)
-			.eq('status', 'active')
-			.limit(1)
-			.maybeSingle();
-
-		if (error) {
-			console.warn(`[Recipe] Lettura ricetta fallita per ${domain}:`, error.message);
-			return null;
+		let rows = cacheGet(`recipe:${domain}`);
+		if (rows === undefined) {
+			const { data, error } = await client.from('scrape_recipes').select('*').eq('domain', domain).eq('status', 'active');
+			if (error) throw new Error(`Lettura ricette fallita: ${error.message}`);
+			rows = data || []; cacheSet(`recipe:${domain}`, rows);
 		}
-
-		cacheSet(`recipe:${domain}`, data ?? null);
-		return data ?? null;
+		return [...rows].filter(row => applies(row, url, productId)).sort((a,b) =>
+			({product:3,url_pattern:2,domain:1}[b.scope] || 1) - ({product:3,url_pattern:2,domain:1}[a.scope] || 1)
+			|| (b.url_pattern?.length || 0) - (a.url_pattern?.length || 0) || b.version-a.version)[0] || null;
 	}
 
 	/**
@@ -145,52 +139,26 @@ function createRecipeStore({ client, ttlMs = DEFAULT_TTL_MS, promoteAfter = 3, q
 	 * @returns {Promise<{status: string, promoted: boolean, quarantined: boolean}>}
 	 */
 	async function recordOutcome(recipe, succeeded) {
-		if (!client || !recipe || !recipe.id) {
-			return { status: recipe?.status ?? 'unknown', promoted: false, quarantined: false };
+		if (!client || !recipe?.id) return { status: recipe?.status ?? 'unknown', promoted: false, quarantined: false };
+		const { data, error } = await client.rpc('record_recipe_evaluation', { p_recipe_id: recipe.id, p_succeeded: succeeded });
+		if (error) throw new Error(`Valutazione ricetta fallita: ${error.message}`);
+		cache.delete(`recipe:${recipe.domain}`); return data;
+	}
+	async function evaluateCandidates(url, result, productId = null, accepted = true) {
+		if (!client || !result || result.debug?.degraded) return;
+		const domain = domainOf(url);
+		const { data, error } = await client.from('scrape_recipes').select('*').eq('domain', domain);
+		if (error) throw new Error(`Lettura candidate fallita: ${error.message}`);
+		for (const recipe of data || []) {
+			if (!['candidate','active'].includes(recipe.status) || !applies(recipe, url, productId)) continue;
+			const spec = recipe.fields?.price;
+			const evidence = (result.candidates || []).filter(c => c.field === 'price' && c.source !== 'recipe' && c.locator?.strategy === spec?.strategy
+				&& (!spec.selector || c.locator.selector === spec.selector) && (!spec.key || c.locator.key === spec.key));
+			// Missing evidence is not a failed execution of this candidate.
+			if (recipe.status === 'candidate' && (!accepted || result.confidence < 0.85 || !evidence.length)) continue;
+			if (recipe.status === 'active' && result.recipeId !== recipe.id) continue;
+			await recordOutcome(recipe, accepted && evidence.some(c => Math.abs(c.value - result.priceValue) < 0.005));
 		}
-
-		const next = nextRecipeState(recipe, succeeded, { promoteAfter, quarantineAfter });
-		const now = new Date().toISOString();
-
-		const update = {
-			success_count: next.successCount,
-			failure_count: next.failureCount,
-			consecutive_failures: next.consecutiveFailures,
-			status: next.status,
-			updated_at: now,
-			...(succeeded ? { last_success_at: now } : { last_failure_at: now }),
-		};
-
-		// Promozione: la precedente attiva va deprecata PRIMA, altrimenti
-		// l'indice unico parziale rifiuterebbe la seconda riga attiva.
-		const promoted = next.status === 'active' && recipe.status !== 'active';
-		if (promoted) {
-			const { error } = await client
-				.from('scrape_recipes')
-				.update({ status: 'deprecated', updated_at: now })
-				.eq('domain', recipe.domain)
-				.eq('url_pattern', recipe.url_pattern ?? '*')
-				.eq('scope', recipe.scope ?? 'domain')
-				.eq('status', 'active');
-			if (error) {
-				console.warn('[Recipe] Deprecazione della precedente attiva fallita:', error.message);
-				return { status: recipe.status, promoted: false, quarantined: false };
-			}
-		}
-
-		const { error } = await client.from('scrape_recipes').update(update).eq('id', recipe.id);
-		if (error) {
-			console.warn('[Recipe] Aggiornamento contatori fallito:', error.message);
-			return { status: recipe.status, promoted: false, quarantined: false };
-		}
-
-		cache.delete(`recipe:${recipe.domain}`);
-
-		return {
-			status: next.status,
-			promoted,
-			quarantined: next.status === 'quarantined' && recipe.status !== 'quarantined',
-		};
 	}
 
 	/**
@@ -227,6 +195,7 @@ function createRecipeStore({ client, ttlMs = DEFAULT_TTL_MS, promoteAfter = 3, q
 		getActiveRecipe,
 		saveLearnedRecipe,
 		recordOutcome,
+		evaluateCandidates,
 		getDomainProfile,
 		clearCache,
 	};

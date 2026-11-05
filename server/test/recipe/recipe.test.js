@@ -166,15 +166,15 @@ describe('applyRecipe', () => {
 		expect(found.meta.viaFallback).toBe(true);
 	});
 
-	it('il peso cresce con lo storico di successi della ricetta', () => {
+	it('il peso non supera l’affidabilità della sorgente sottostante', () => {
 		const fields = { price: { strategy: 'css', selector: '.p', attr: null } };
 		const page = doc('<div class="p">10,00 €</div>');
 
 		const nuova = applyRecipe({ domain: 'x', fields, success_count: 0 }, page)[0];
 		const collaudata = applyRecipe({ domain: 'x', fields, success_count: 20 }, page)[0];
 
-		expect(collaudata.weight).toBeGreaterThan(nuova.weight);
-		expect(collaudata.weight).toBe(0.95);
+		expect(collaudata.weight).toBe(nuova.weight);
+		expect(collaudata.weight).toBeLessThanOrEqual(0.70);
 	});
 
 	it('non produce candidati se nulla corrisponde', () => {

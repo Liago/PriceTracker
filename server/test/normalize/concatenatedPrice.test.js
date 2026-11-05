@@ -24,7 +24,7 @@ const productPage = (priceMarkup) => `<html><head>
   <meta property="og:image" content="https://m.media-amazon.com/images/I/61LDuVAPqkL.jpg">
 </head><body><div id="centerCol">
   <h1 id="productTitle">Scrivania regolabile in altezza, elettrica 120 x 60 cm</h1>
-  ${priceMarkup}
+  <div id="corePriceDisplay_desktop_feature_div">${priceMarkup}</div>
 </div></body></html>`;
 
 describe('hasBrokenGrouping - lo spazio fra cifre raggruppa per tre, o non è un numero', () => {

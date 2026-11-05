@@ -174,7 +174,10 @@ function extract(doc) {
 		// sempre l'oggetto del prodotto e non un frammento di configurazione.
 		matches.sort((a, b) => Number(b.hasIdentity) - Number(a.hasIdentity));
 
-		const best = matches[0];
+		const identified = matches.filter(m => m.hasIdentity);
+		const pool = identified.length ? identified : matches;
+		if (new Set(pool.map(m => `${m.price}:${m.currency}`)).size > 1) continue;
+		const best = pool[0];
 		const value = parsePrice(best.price);
 		if (value === null) continue;
 

@@ -12,7 +12,8 @@ const { createClient } = require('@supabase/supabase-js');
 const { createJobQueue } = require('../../server/scrape/jobs/queue');
 const { createRecipeStore } = require('../../server/scrape/recipe/store');
 const { learnRecipe } = require('../../server/scrape/recipe/learner');
-const { createRateLimiter } = require('../../server/scrape/policy/rateLimiter');
+const { requireResult } = require('../../server/services/trackingRepository');
+const { normalizeUserSettings } = require('../../server/services/userSettings');
 const { checkUrl } = require('../../server/scrape/policy/urlPolicy');
 const { checkProduct } = require('../../server/services/productChecker');
 const { createTrackingRepository } = require('../../server/services/trackingRepository');
@@ -24,11 +25,12 @@ const BATCH_SIZE = parseInt(process.env.SCRAPE_WORKER_BATCH || '5', 10);
 const TIME_BUDGET_MS = parseInt(process.env.SCRAPE_WORKER_BUDGET_MS || '20000', 10);
 const RESERVE_MS = 6000;
 
-module.exports.handler = async () => {
-	const startedAt = Date.now();
+function createWorker({ createClientImpl = createClient, scrapeImpl = scrapeProduct, checkUrlImpl = checkUrl, now = () => Date.now() } = {}) {
+return async () => {
+	const startedAt = now();
 	const workerId = `worker-${Math.random().toString(36).slice(2, 10)}`;
 
-	const client = createClient(
+	const client = createClientImpl(
 		process.env.SUPABASE_URL,
 		process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY,
 	);
@@ -36,7 +38,6 @@ module.exports.handler = async () => {
 	const queue = createJobQueue({ client });
 	const recipes = createRecipeStore({ client });
 	const repo = createTrackingRepository(client);
-	const limiter = createRateLimiter();
 
 	const processed = [];
 
@@ -49,56 +50,62 @@ module.exports.handler = async () => {
 		for (const job of jobs) {
 			// Budget: se non c'e' tempo per un altro controllo si lascia il job
 			// alla prossima invocazione invece di iniziarlo e non finirlo.
-			if (Date.now() - startedAt > TIME_BUDGET_MS - RESERVE_MS) {
-				await queue.fail(job, 'budget di tempo esaurito, riaccodato');
+			if (now() - startedAt > TIME_BUDGET_MS - RESERVE_MS) {
+				await queue.defer(job, 'budget di tempo esaurito, riaccodato');
 				continue;
 			}
 
 			// Limite di frequenza del dominio, condiviso fra tutti gli utenti.
 			const profile = await recipes.getDomainProfile(job.url);
-			const gate = limiter.tryAcquire(job.domain, profile || {});
+			const gate = requireResult(await client.rpc('reserve_scrape_domain', { p_domain: job.domain, p_interval_ms: Math.max(1000, Math.ceil(60000 / (profile?.rate_limit_rpm || 6))) }), 'Prenotazione dominio');
 			if (!gate.allowed) {
-				await queue.fail(job, `limite di frequenza, riprovo fra ${Math.round(gate.waitMs / 1000)}s`);
+				await queue.defer(job, `limite di frequenza, riprovo fra ${Math.round(gate.waitMs / 1000)}s`, gate.waitMs);
 				continue;
 			}
 
 			try {
-				const policy = await checkUrl(job.url, { domainProfile: profile });
-				if (!policy.allowed) {
-					await queue.fail(job, `URL non ammesso: ${policy.reason}`);
-					continue;
-				}
+				const policy = await checkUrlImpl(job.url, { domainProfile: profile });
+
 
 				const { data: product, error } = await client
 					.from('products').select('*').eq('id', job.product_id).maybeSingle();
-				if (error || !product) {
+				if (error) throw new Error(`Lettura prodotto fallita: ${error.message}`);
+				if (!product) {
 					await queue.complete(job.id); // prodotto sparito: il job non ha piu' senso
 					continue;
 				}
 
-				const recipe = await recipes.getActiveRecipe(product.url);
+				if (product.monitoring_until && product.monitoring_until < new Date().toISOString().slice(0, 10)) { await queue.complete(job.id); continue; }
+				const settingsRow = requireResult(await client.from('user_settings').select('*').eq('user_id', product.user_id).maybeSingle(), 'Impostazioni');
+				const settings = normalizeUserSettings(settingsRow);
+				const recipe = await recipes.getActiveRecipe(product.url, product.id);
 				let lastResult = null;
-				const scrape = async (url) => {
+				const scrape = async (url, options = {}) => {
+					if (!policy.allowed) {
+						const failure = new Error(`URL non ammesso: ${policy.reason}`);
+						failure.antiBotSuspected = ['dominio_bloccato', 'escluso_da_robots'].includes(policy.reason);
+						throw failure;
+					}
 					// Il budget del singolo controllo e' cio' che resta al worker:
 					// senza, il motore userebbe il proprio default e potrebbe
 					// sforare il lotto invece di lasciare il job al prossimo giro.
-					lastResult = await scrapeProduct(url, {
-						recipe,
+					lastResult = await scrapeImpl(url, {
+						recipe: options.confirmation ? null : recipe,
+						maxRetries: settings.maxRetries,
 						lastKnownPrice: product.current_price ?? null,
-						budgetMs: Math.max(TIME_BUDGET_MS - RESERVE_MS - (Date.now() - startedAt), 2000),
+						budgetMs: Math.max(TIME_BUDGET_MS - RESERVE_MS - (now() - startedAt), 2000),
 					});
 					return lastResult;
 				};
 
 				const outcome = await checkProduct({ product, scrape, repo });
 
-				if (recipe) {
-					await recipes.recordOutcome(recipe, outcome.accepted);
-				} else if (outcome.accepted && lastResult) {
+				await recipes.evaluateCandidates(product.url, lastResult, product.id, outcome.accepted).catch(error => console.warn('[Recipe]', error.message));
+
+				if (outcome.accepted && !recipe && lastResult) {
 					const { recipe: learned } = learnRecipe(lastResult, { url: product.url });
 					if (learned) await recipes.saveLearnedRecipe(learned);
 				}
-
 				await queue.complete(job.id);
 				processed.push({ productId: job.product_id, accepted: outcome.accepted, health: outcome.health });
 			} catch (jobError) {
@@ -112,10 +119,13 @@ module.exports.handler = async () => {
 
 		return {
 			statusCode: 200,
-			body: JSON.stringify({ workerId, processed: processed.length, pending, durationMs: Date.now() - startedAt }),
+			body: JSON.stringify({ workerId, processed: processed.length, pending, durationMs: now() - startedAt }),
 		};
 	} catch (error) {
 		console.error(`[Worker ${workerId}] Errore:`, error.message);
 		return { statusCode: 500, body: JSON.stringify({ error: error.message, workerId }) };
 	}
 };
+
+}
+module.exports = { createWorker, handler: createWorker() };

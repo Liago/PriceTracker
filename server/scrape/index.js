@@ -48,9 +48,11 @@ function interpret(html, options = {}) {
 		sku: pipeline.result.sku ?? null,
 		gtin: pipeline.result.gtin ?? null,
 		store: offerStore(url),
+		priceStatus: pipeline.result.price_status ?? null,
 		details: {
 			seller: pipeline.result.seller ?? null,
 			condition: pipeline.result.condition ?? null,
+			variant: pipeline.result.variant ?? {},
 		},
 
 		// Diagnostica: e' cio' che finira' in scrape_runs.

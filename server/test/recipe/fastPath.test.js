@@ -22,13 +22,13 @@ function recipeFor(fixtureName, pageUrl) {
 }
 
 describe('fast path', () => {
-	it('con una ricetta collaudata salta la scoperta', () => {
+	it('con una ricetta collaudata verifica comunque le sorgenti attuali', () => {
 		const out = runPipeline(html, { url, recipe: recipeFor('shopify-like.html', url) });
 
-		expect(out.usedFastPath).toBe(true);
+		expect(out.usedFastPath).toBe(false);
 		expect(out.result.price).toBe(149);
-		expect(out.extractorsRan.map((e) => e.name)).toEqual(['recipe']);
-		expect(out.signals).toContain('fast-path');
+		expect(out.extractorsRan.map((e) => e.name)).toContain('jsonld');
+		expect(out.signals).not.toContain('fast-path');
 	});
 
 	it('riporta quale ricetta ha usato', () => {
@@ -43,11 +43,11 @@ describe('fast path', () => {
 		expect(veloce.result.price).toBe(completa.result.price);
 	});
 
-	it('esegue meno lavoro della scoperta completa', () => {
+	it('confronta la ricetta con tutti gli estrattori', () => {
 		const completa = runPipeline(html, { url });
 		const veloce = runPipeline(html, { url, recipe: recipeFor('shopify-like.html', url) });
 
-		expect(veloce.extractorsRan).toHaveLength(1);
+		expect(veloce.extractorsRan).toHaveLength(completa.extractorsRan.length + 1);
 		expect(completa.extractorsRan).toHaveLength(6);
 	});
 });
@@ -111,13 +111,13 @@ describe('fast path - ricadute sulla scoperta', () => {
 describe('fast path - shop artigianale', () => {
 	const artUrl = 'https://bottega-legno.it/p/tagliere';
 
-	it('la ricetta DOM riapplicata trova il prezzo senza rifare l\'euristica', () => {
+	it('la ricetta DOM viene confrontata con la pagina attuale', () => {
 		const recipe = recipeFor('artisanal-no-structured-data.html', artUrl);
 		const out = runPipeline(fixture('artisanal-no-structured-data.html'), { url: artUrl, recipe });
 
 		expect(out.result.price).toBe(44.5);
 		// La ricetta include titolo e immagine, quindi la riconciliazione non
 		// penalizza e il fast path regge anche qui.
-		expect(out.usedFastPath).toBe(true);
+		expect(out.usedFastPath).toBe(false);
 	});
 });

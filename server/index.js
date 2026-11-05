@@ -48,7 +48,7 @@ if (process.env.NODE_ENV !== 'production' && !process.env.NETLIFY) {
 	console.log(`[Server] Controllo prezzi in sviluppo: ${cronExpression}`);
 	cron.schedule(cronExpression, () => {
 		console.log('[Server] Controllo prezzi schedulato (sviluppo)');
-		checkProductPrices();
+		checkProductPrices().catch(error => console.error('[Scheduler]', error.message));
 	});
 } else {
 	console.log('[Server] Scheduler locale disattivato: in produzione decidono dispatcher e worker');
@@ -88,13 +88,6 @@ const router = express.Router();
 router.use(apiLimiter);
 router.post('/scrape', scrapeLimiter);
 registerRoutes({ getClient })(router);
-
-// Innesco manuale del controllo, utile in sviluppo.
-router.post('/check-prices', async (req, res) => {
-	console.log('[Server] Controllo prezzi avviato a mano');
-	checkProductPrices();
-	res.json({ message: 'Controllo avviato in background' });
-});
 
 app.use('/api', router);
 

@@ -1,3 +1,4 @@
+import { useLiveRefresh } from '../lib/useLiveRefresh'
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useParams, useNavigate, Link } from 'react-router-dom'
@@ -82,7 +83,9 @@ export default function ProductDetail() {
     return () => document.removeEventListener('keydown', onKey)
   }, [isImageModalOpen])
 
-  const fetchProductAndHistory = async () => {
+  useLiveRefresh('products', () => { void fetchProductAndHistory(true) }, `id=eq.${id}`)
+
+  const fetchProductAndHistory = async (preserveSettings = false) => {
     try {
       // Fetch product details
       const { data: productData, error: productError } = await supabase
@@ -94,8 +97,10 @@ export default function ProductDetail() {
       if (productError) throw productError
       const loaded = productData as Product
       setProduct(loaded)
-      setTargetPrice(loaded.target_price != null ? String(loaded.target_price) : '')
-      setMonitoringUntil(loaded.monitoring_until || '')
+      if (!preserveSettings) {
+        setTargetPrice(loaded.target_price != null ? String(loaded.target_price) : '')
+        setMonitoringUntil(loaded.monitoring_until || '')
+      }
 
       // Fetch price history
       const { data: historyData, error: historyError } = await supabase
@@ -209,7 +214,7 @@ export default function ProductDetail() {
             Torna ai prodotti
           </Link>
           <span className="text-label text-muted-foreground">
-            Ultimo controllo: {refreshing ? 'in corso…' : formatDateTime(product.last_checked_at)}
+            Ultimo prezzo verificato: {refreshing ? 'in corso…' : formatDateTime(product.last_success_at)}
           </span>
         </div>
       </BlurFade>
@@ -268,6 +273,14 @@ export default function ProductDetail() {
                 </Button>
               </div>
               <h1 className="font-serif text-title">{product.name}</h1>
+              {product.details?.variant && Object.keys(product.details.variant).length > 0 && (
+                <p className="mt-2 text-label text-muted-foreground">
+                  Configurazione monitorata: {Object.entries(product.details.variant).map(([key, value]) =>
+                    `${({ storage: 'Memoria', color: 'Colore', grade: 'Condizione', batteryType: 'Batteria' } as Record<string, string>)[key] || key}: ${value}`,
+                  ).join(' · ')}
+                </p>
+              )}
+
               <a
                 href={product.url}
                 target="_blank"

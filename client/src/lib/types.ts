@@ -12,6 +12,7 @@ export type Availability =
 
 export interface ProductDetails {
   features?: string[]
+  variant?: Record<string, string>
   [key: string]: unknown
 }
 
@@ -28,6 +29,7 @@ export interface Product {
   target_price: number | string | null
   monitoring_until: string | null
   last_checked_at: string | null
+  last_success_at?: string | null
   created_at: string | null
   tracking_health: TrackingHealth | null
   availability: Availability | null
@@ -56,7 +58,7 @@ export interface NotificationRow {
   new_price: number | string | null
   read: boolean
   created_at: string
-  products?: { name: string | null; image: string | null; url: string | null } | null
+  products?: { name: string | null; image: string | null; url: string | null; currency?: string | null } | null
 }
 
 export interface UserSettings {

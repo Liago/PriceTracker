@@ -12,17 +12,18 @@ function fakeRepo({ history = [] } = {}) {
 
 	return {
 		written,
-		async ensureOffer(product, descriptor) {
-			const offer = { id: 'offer-1', offer_key: descriptor.offerKey, product_id: product.id };
+		async getReference() { return { offer: null, history }; },
+		async commitCheck({ product, descriptor, observation, patch }) {
 			written.offers.push({ product, descriptor });
-			return offer;
+			written.observations.push(observation);
+			written.productPatches.push({ id: product.id, patch });
+			const changed = observation.accepted && Math.round(Number(product.current_price)*100) !== Math.round(observation.price*100);
+			if (observation.accepted) written.offerPatches.push({ id:'offer-1', patch });
+			if (changed) written.priceHistory.push({ product_id: product.id, price: observation.price });
+			const notified = changed && observation.availability === 'in_stock' && product.target_price && Number(product.current_price)>Number(product.target_price) && observation.price<=Number(product.target_price);
+			if (notified) written.notifications.push({ product, oldPrice:Number(product.current_price), newPrice:observation.price });
+			return { priceChanged: Boolean(changed), notified: Boolean(notified), offerId:'offer-1' };
 		},
-		async getRecentObservations() { return history; },
-		async insertObservation(row) { written.observations.push(row); },
-		async updateProduct(id, patch) { written.productPatches.push({ id, patch }); },
-		async updateOffer(id, patch) { written.offerPatches.push({ id, patch }); },
-		async insertPriceHistory(row) { written.priceHistory.push(row); },
-		async notifyPriceDrop(payload) { written.notifications.push(payload); },
 	};
 }
 

@@ -21,7 +21,9 @@ const { checkProduct } = require('../services/productChecker');
 const { createTrackingRepository } = require('../services/trackingRepository');
 const { createRecipeStore } = require('../scrape/recipe/store');
 const { learnRecipe } = require('../scrape/recipe/learner');
-const { describeOffer } = require('../scrape/normalize/offer');
+const { requireResult } = require('../services/trackingRepository');
+const { normalizeUserSettings } = require('../services/userSettings');
+const { evaluatePrice } = require('../services/evaluatePrice');
 
 /**
  * Quanto tempo resta allo scrape.
@@ -200,13 +202,23 @@ async function authenticate(req, client) {
  * @param {function} deps.getClient - () => client Supabase service_role
  * @returns {function} (router) => void
  */
-function registerRoutes({ getClient }) {
+function registerRoutes({ getClient, scrapeImpl = scrapeProduct, checkUrlImpl = checkUrl }) {
 	return function attach(router) {
 		// Il body JSON prima di tutto il resto. Su Netlify `express.json()` non
 		// lavora - serverless-http consegna una richiesta gia' completa e
 		// body-parser la salta - e senza questo passaggio ogni route leggerebbe
 		// un Buffer al posto dei suoi campi. Vedi ./jsonBody.js.
 		router.use(jsonBody());
+		router.post('/check-prices', async (req, res) => {
+			try {
+				const client = getClient();
+				const { user } = await authenticate(req, client);
+				if (!user) return res.status(401).json({ error: 'sessione non valida' });
+				const result = await require('../services/priceTracker').enqueueDueChecks({ client, userId: user.id, trigger: 'manual' });
+				res.status(202).json({ message: 'Controlli accodati', ...result });
+			} catch (error) { console.error('[API]', error.message); res.status(500).json({ error: 'Accodamento fallito' }); }
+		});
+
 
 		/**
 		 * Analizza un URL senza salvarlo. Serve all'anteprima nella UI.
@@ -215,11 +227,11 @@ function registerRoutes({ getClient }) {
 			const startedAt = Date.now();
 			const { url } = req.body || {};
 			try {
-				const policy = await checkUrl(url);
+				const policy = await checkUrlImpl(url);
 				if (!policy.allowed) {
 					return res.status(400).json({ error: `URL non ammesso: ${policy.reason}`, reason: policy.reason });
 				}
-				const data = await scrapeProduct(policy.url, { budgetMs: remainingBudget(startedAt) });
+				const data = await scrapeImpl(policy.url, { budgetMs: remainingBudget(startedAt) });
 				res.json(normalizeScrapeResult(data, policy.url));
 			} catch (error) {
 				if (error.code === BUDGET_EXCEEDED) return respondIncomplete(res, { error });
@@ -240,92 +252,32 @@ function registerRoutes({ getClient }) {
 			const startedAt = Date.now();
 
 			try {
-				const policy = await checkUrl(url);
+				const policy = await checkUrlImpl(url);
 				if (!policy.allowed) {
 					return res.status(400).json({ error: `URL non ammesso: ${policy.reason}`, reason: policy.reason });
 				}
 
 				const recipes = createRecipeStore({ client });
 				const recipe = await recipes.getActiveRecipe(policy.url);
-				const scraped = await scrapeProduct(policy.url, { recipe, budgetMs: remainingBudget(startedAt) });
+				const scraped = await scrapeImpl(policy.url, { recipe, budgetMs: remainingBudget(startedAt) });
 				const data = normalizeScrapeResult(scraped, policy.url);
 
-				// Nessun prezzo leggibile: il prodotto non viene creato. Una storia
-				// prezzi che parte da un numero sbagliato non e' recuperabile.
-				//
-				// Prima pero' bisogna sapere di cosa si sta parlando. Se la lettura
-				// e' rimasta a meta' - il browser non e' partito nel budget, oppure
-				// il sito ha risposto con una sfida - allora non si e' visto niente,
-				// e dire «questa pagina non ha un prezzo» sarebbe un'affermazione
-				// che non siamo in grado di fare.
-				if (data.priceValue === null) {
+				const reading = evaluatePrice({ scraped, product: { url: policy.url } });
+				if (!reading.validation.accepted) {
 					if (scraped.debug?.degraded) return respondIncomplete(res, { scraped });
-
-					return res.status(422).json({
-						error: 'Nessun prezzo leggibile su quella pagina',
-						code: 'LOW_CONFIDENCE',
-						confidence: scraped.confidence ?? 0,
-						diagnostics: describeAttempt(scraped),
-					});
+					return res.status(422).json({ error: 'Il prezzo della configurazione selezionata non è verificabile', code: 'LOW_CONFIDENCE',
+						confidence: reading.confidence, reasons: reading.validation.reasons, diagnostics: describeAttempt(scraped) });
 				}
-
-				const domain = new URL(policy.url).hostname.replace(/^www\./, '').toLowerCase();
-				const { data: product, error: insertError } = await client
-					.from('products')
-					.insert({
-						user_id: user.id,
-						url: policy.url,
-						canonical_url: scraped.canonicalUrl || policy.url,
-						domain,
-						name: data.title,
-						image: data.image,
-						description: data.description,
-						current_price: data.priceValue,
-						currency: data.currency,
-						availability: data.availability,
-						target_price: targetPrice,
-						monitoring_until: monitoringUntil,
-						store: data.store,
-						brand: scraped.brand ?? null,
-						sku: scraped.sku ?? null,
-						gtin: scraped.gtin ?? null,
-						details: data.details || {},
-						tracking_health: 'healthy',
-						last_success_at: new Date().toISOString(),
-					})
-					.select()
-					.single();
-
-				if (insertError) throw new Error(insertError.message);
-
-				// Offerta e prima osservazione: la serie storica parte da qui.
-				const descriptor = scraped.offer || describeOffer(data, policy.url);
-				const { data: offer } = await client.from('product_offers').insert({
-					product_id: product.id,
-					offer_key: descriptor.offerKey,
-					variant: descriptor.variant || {},
-					seller: descriptor.seller,
-					condition: descriptor.condition,
-					url: descriptor.url || policy.url,
-					is_primary: true,
-					current_price: data.priceValue,
-					currency: data.currency,
-					availability: data.availability,
-					last_seen_at: new Date().toISOString(),
-				}).select().single();
-
-				if (offer) {
-					await client.from('products').update({ primary_offer_id: offer.id }).eq('id', product.id);
-					await client.from('price_observations').insert({
-						product_id: product.id,
-						offer_id: offer.id,
-						price: data.priceValue,
-						currency: data.currency,
-						availability: data.availability,
-						confidence: scraped.confidence ?? null,
-						accepted: true,
-					});
-				}
+				if (targetPrice !== null && (!Number.isFinite(targetPrice) || targetPrice <= 0)) return res.status(400).json({ error: 'Prezzo obiettivo non valido' });
+				if (monitoringUntil !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(monitoringUntil) || !Number.isFinite(Date.parse(monitoringUntil)))) return res.status(400).json({ error: 'Data non valida' });
+				const product = await createTrackingRepository(client).createProduct({
+					product: { user_id: user.id, url: policy.url, canonical_url: scraped.canonicalUrl || policy.url,
+						domain: new URL(policy.url).hostname.replace(/^www\./, '').toLowerCase(),
+						name: data.title, image: data.image, description: data.description, current_price: reading.price,
+						currency: reading.currency, availability: reading.availability, target_price: targetPrice, monitoring_until: monitoringUntil,
+						store: data.store, brand: scraped.brand ?? null, sku: scraped.sku ?? null, gtin: scraped.gtin ?? null, details: data.details || {} },
+					descriptor: reading.descriptor, observation: { confidence: reading.confidence },
+				});
 
 				// Un dominio nuovo che si legge bene produce subito una ricetta.
 				if (!recipe && scraped.fields) {
@@ -358,13 +310,19 @@ function registerRoutes({ getClient }) {
 				if (error || !product) return res.status(404).json({ error: 'Prodotto non trovato' });
 
 				const recipes = createRecipeStore({ client });
-				const recipe = await recipes.getActiveRecipe(product.url);
+				const recipe = await recipes.getActiveRecipe(product.url, product.id);
 				const repo = createTrackingRepository(client);
+				const userSettings = normalizeUserSettings(requireResult(await client.from('user_settings').select('*').eq('user_id', user.id).maybeSingle(), 'Impostazioni'));
+				const domain = new URL(product.url).hostname.replace(/^www\./, '');
+				const gate = requireResult(await client.rpc('reserve_scrape_domain', { p_domain: domain, p_interval_ms: Math.max(10000, userSettings.scrapeDelayMs) }), 'Prenotazione dominio');
+				if (!gate.allowed) { res.set('Retry-After', String(Math.ceil(gate.waitMs / 1000))); return res.status(429).json({ error: 'Attendi prima di controllare nuovamente questo negozio' }); }
+
 
 				let lastResult = null;
-				const scrape = async (url) => {
-					lastResult = await scrapeProduct(url, {
-						recipe,
+				const scrape = async (url, options = {}) => {
+					lastResult = await scrapeImpl(url, {
+						recipe: options.confirmation ? null : recipe,
+						maxRetries: userSettings.maxRetries,
 						lastKnownPrice: product.current_price,
 						budgetMs: remainingBudget(startedAt),
 					});
@@ -372,7 +330,7 @@ function registerRoutes({ getClient }) {
 				};
 
 				const outcome = await checkProduct({ product, scrape, repo });
-				if (recipe) await recipes.recordOutcome(recipe, outcome.accepted);
+				await recipes.evaluateCandidates(product.url, lastResult, product.id, outcome.accepted).catch(error => console.warn('[Recipe]', error.message));
 
 				res.json({
 					accepted: outcome.accepted,

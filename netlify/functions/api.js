@@ -13,7 +13,6 @@ const serverless = require('serverless-http');
 const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
 const { registerRoutes } = require('../../server/api/routes');
-const { checkProductPrices } = require('../../server/services/priceTracker');
 
 dotenv.config();
 
@@ -54,15 +53,7 @@ router.use(apiLimiter);
 router.post('/scrape', scrapeLimiter);
 registerRoutes({ getClient })(router);
 
-router.post('/check-prices', async (req, res) => {
-	try {
-		await checkProductPrices();
-		res.json({ message: 'Controllo completato' });
-	} catch (error) {
-		console.error('[API] Controllo prezzi fallito:', error.message);
-		res.status(500).json({ error: 'Controllo prezzi fallito' });
-	}
-});
+
 
 // Montato su entrambi i percorsi: la riscrittura di Netlify usa /api, ma la
 // function e' raggiungibile anche direttamente.

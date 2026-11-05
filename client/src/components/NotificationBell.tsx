@@ -1,10 +1,11 @@
+import { useLiveRefresh } from '../lib/useLiveRefresh'
 import { useState, useEffect, useRef, useCallback, type MouseEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Bell, Check, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import type { NotificationRow } from '../lib/types'
-import { formatDate } from '../lib/format'
+import { formatDate, priceText } from '../lib/format'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import { cn } from '../lib/utils'
@@ -26,7 +27,7 @@ export default function NotificationBell({ userId }: { userId: string }) {
   const fetchNotifications = useCallback(async (isCancelled: () => boolean = () => false) => {
     const { data, error } = await supabase
       .from('notifications')
-      .select('*')
+      .select('*, products(name, image, url, currency)')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(5)
@@ -50,26 +51,10 @@ export default function NotificationBell({ userId }: { userId: string }) {
     // Il primo caricamento parte dopo il commit, non dentro il render.
     const initial = setTimeout(() => fetchNotifications(() => cancelled), 0)
 
-    // Subscribe to realtime changes
-    const channel = supabase
-      .channel('public:notifications')
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'notifications',
-        filter: `user_id=eq.${userId}`,
-      }, (payload) => {
-        setNotifications((prev) => [payload.new as NotificationRow, ...prev])
-        setUnreadCount((prev) => prev + 1)
-      })
-      .subscribe()
-
-    return () => {
-      cancelled = true
-      clearTimeout(initial)
-      supabase.removeChannel(channel)
-    }
+    return () => { cancelled = true; clearTimeout(initial) }
   }, [userId, fetchNotifications])
+
+  useLiveRefresh('notifications', () => { void fetchNotifications() }, `user_id=eq.${userId}`)
 
   useEffect(() => {
     if (!isOpen) return
@@ -110,6 +95,7 @@ export default function NotificationBell({ userId }: { userId: string }) {
 
     if (!error) {
       setNotifications((prev) => prev.filter((n) => n.id !== id))
+      void fetchNotifications()
     }
   }
 
@@ -187,8 +173,8 @@ export default function NotificationBell({ userId }: { userId: string }) {
                           <Badge tone="good" className="mb-1">Calo di prezzo</Badge>
                         )}
                         <p className="text-body">
-                          Da <span className="tabular-nums text-muted-foreground">€{notif.old_price}</span> a{' '}
-                          <strong className="font-semibold tabular-nums">€{notif.new_price}</strong>
+                          Da <span className="tabular-nums text-muted-foreground">{notif.products?.currency || 'EUR'} {priceText(notif.old_price)}</span> a{' '}
+                          <strong className="font-semibold tabular-nums">{notif.products?.currency || 'EUR'} {priceText(notif.new_price)}</strong>
                         </p>
                         <span className="text-label text-subtle">{formatDate(notif.created_at)}</span>
                       </div>

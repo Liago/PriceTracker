@@ -105,8 +105,8 @@ describe('jsonLd - forme che gli scraper attuali non gestiscono', () => {
 		}));
 
 		const prices = all(candidates, 'price').map((c) => c.value);
-		expect(prices).toEqual([729, 799]);
-		expect(pick(candidates, 'seller').value).toBe('Altro venditore');
+		expect(prices).toEqual([]);
+		expect(pick(candidates, 'seller')).toBeUndefined();
 	});
 
 	it('AggregateOffer: prende lowPrice e segnala l\'intervallo', () => {

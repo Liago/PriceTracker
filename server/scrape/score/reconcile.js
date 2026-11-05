@@ -50,7 +50,7 @@ function reconcileField(field, candidates) {
 	const winner = ranked[0];
 
 	const agreeingSources = [...new Set(
-		ranked.filter((c) => sameValue(field, c.value, winner.value)).map((c) => c.source)
+		ranked.filter((c) => sameValue(field, c.value, winner.value)).map((c) => c.source === 'recipe' ? ({ css: 'dom' }[c.meta?.underlyingStrategy] || c.meta?.underlyingStrategy || 'recipe') : c.source)
 	)];
 
 	// Concorrenti: valore diverso e peso comparabile. Un candidato molto piu'
@@ -134,7 +134,7 @@ function reconcile(candidates, context = {}) {
 	let confidence = base + gained;
 
 	if (price.competingCount > 0) {
-		confidence -= CONFIDENCE.COMPETING_PENALTY;
+		confidence = Math.min(confidence - CONFIDENCE.COMPETING_PENALTY, 0.59);
 		signals.push(`concorrenti:${price.competingCount}`);
 	}
 
@@ -157,6 +157,11 @@ function reconcile(candidates, context = {}) {
 		signals.push('dom-ambiguo');
 	}
 
+	if (['currency', 'sku', 'gtin'].some(field => fields[field]?.competingCount > 0)) confidence = Math.min(confidence, 0.59);
+	if (price.meta?.isRange || result.price_status) {
+		confidence = Math.min(confidence, 0.59);
+		signals.push('prezzo-non-puntuale');
+	}
 	confidence = Math.max(0, Math.min(1, confidence));
 
 	return {

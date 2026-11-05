@@ -1,10 +1,4 @@
-/**
- * La pipeline di estrazione generica.
- *
- * Esegue gli estrattori sul Document, raccoglie i candidati, li riconcilia e
- * restituisce un risultato con confidenza e provenienza. Non conosce nessuno
- * store: le specificita' vivranno come ricette a database (fase 3).
- */
+/** Extract current-page evidence, with recipes used only as additional candidates. */
 
 const { createDocument } = require('./document');
 const { reconcile } = require('./score/reconcile');
@@ -35,11 +29,7 @@ const EXTRACTORS = [platforms, jsonLd, appState, microdata, metaTags, domHeurist
  * @param {string} [options.url]
  * @param {number|null} [options.lastKnownPrice] - premia la coerenza storica
  * @param {boolean} [options.antiBotDetected=false]
- * @param {object|null} [options.recipe] - ricetta attiva per il dominio. Se
- *   presente si tenta il fast path: si riapplica direttamente la strategia che
- *   ha funzionato l'ultima volta, invece di rieseguire tutti gli estrattori.
- * @param {number} [options.fastPathThreshold=0.85] - confidenza sotto la quale
- *   il fast path non viene considerato sufficiente e si passa alla scoperta
+ * @param {object|null} [options.recipe] - previous extraction strategy, revalidated on this document
  * @returns {object} risultato con campi, confidenza, candidati e diagnostica
  */
 function runPipeline(input, options = {}) {
@@ -48,7 +38,6 @@ function runPipeline(input, options = {}) {
 		lastKnownPrice = null,
 		antiBotDetected = false,
 		recipe = null,
-		fastPathThreshold = 0.85,
 	} = options;
 
 	const doc = typeof input === 'string' ? createDocument(input, { url }) : input;
@@ -57,76 +46,18 @@ function runPipeline(input, options = {}) {
 	const candidates = [];
 	const extractorsRan = [];
 
-	// --- Fast path ---
-	//
-	// Se la ricetta produce un risultato affidabile ci si ferma qui: e' il
-	// motivo per cui il refactor e' sostenibile in produzione. La scoperta
-	// completa costa - cinque estrattori e una riconciliazione - mentre
-	// riapplicare una strategia nota no.
+	// Recipes remain evidence; always compare against the current document.
 	if (recipe) {
-		const recipeStart = Date.now();
-		let produced = [];
-		let error = null;
-
-		try {
-			produced = applyRecipe(recipe, doc) || [];
-		} catch (e) {
-			error = e.message;
-		}
-
-		extractorsRan.push({
-			name: 'recipe',
-			candidates: produced.length,
-			durationMs: Date.now() - recipeStart,
-			error,
-		});
-
-		if (produced.length > 0) {
-			const fastResult = reconcile(produced, { antiBotDetected });
-
-			// Un prezzo arrivato per fallback non autorizza il fast path.
-			//
-			// La confidenza del fast path e' auto-referenziale: misura l'accordo
-			// fra sorgenti, ma il fast path le altre sorgenti non le esegue, per
-			// cui un unico candidato di una ricetta collaudata arriva vicino a 1
-			// senza che nulla lo abbia confermato. Finche' e' la strategia
-			// principale a produrlo il rischio e' accettabile - e' quella che ha
-			// funzionato l'ultima volta. Ma se ha smesso di funzionare e risponde
-			// un fallback, allora la pagina e' cambiata, ed e' esattamente il
-			// momento in cui fidarsi ciecamente costa di piu': su Amazon un
-			// fallback che scivola sul primo `.a-price` della pagina legge il
-			// prezzo di uno sponsorizzato, e nessuno se ne accorge perche' un
-			// numero c'e' sempre.
-			//
-			// Si paga una scoperta completa solo in quel caso, cioe' quando serve.
-			const priceViaFallback = produced.some((c) => c.field === 'price' && c.meta?.viaFallback);
-
-			if (priceViaFallback) {
-				console.log('[Pipeline] Prezzo dalla ricetta per fallback: eseguo comunque la scoperta per confronto');
-			}
-
-			if (!priceViaFallback && fastResult.confidence >= fastPathThreshold) {
-				return {
-					url: doc.url,
-					canonicalUrl: doc.canonicalUrl(),
-					result: fastResult.result,
-					fields: fastResult.fields,
-					confidence: fastResult.confidence,
-					signals: [...fastResult.signals, 'fast-path'],
-					candidates: produced,
-					extractorsRan,
-					usedFastPath: true,
-					recipeId: recipe.id ?? null,
-					recipeVersion: recipe.version ?? null,
-					durationMs: Date.now() - startedAt,
-				};
-			}
-
-			// Sotto soglia: i candidati della ricetta restano in gioco, ma si
-			// esegue anche la scoperta. Se ne uscira' una strategia migliore,
-			// il learner la registrera' come nuova versione.
-			candidates.push(...produced);
-		}
+		const produced = applyRecipe(recipe, doc);
+		candidates.push(...produced);
+		extractorsRan.push({ name: 'recipe', candidates: produced.length, durationMs: 0, error: null });
+	}
+	const retailer = require('./extract/retailers').extract(doc);
+	if (retailer !== null) {
+		const reconciled = reconcile(retailer, { antiBotDetected });
+		return { url: doc.url, canonicalUrl: doc.canonicalUrl(), ...reconciled,
+			candidates: retailer, extractorsRan: [{ name: 'retailer', candidates: retailer.length, durationMs: Date.now() - startedAt }],
+			usedFastPath: false, recipeId: null, recipeVersion: null, durationMs: Date.now() - startedAt };
 	}
 
 	for (const extractor of EXTRACTORS) {
