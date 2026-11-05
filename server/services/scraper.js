@@ -14,7 +14,7 @@
  *            JavaScript, e a quelle che rispondono 403 a chi non e' un browser.
  *
  * Il tier 1 non e' gratis e in produzione non e' nemmeno sempre possibile: una
- * function sincrona di Netlify vive dieci secondi, e avviare Chromium ne costa
+ * function sincrona ha un budget limitato, e avviare Chromium ne costa
  * gia' diversi. Da qui il budget: ogni chiamata riceve una scadenza e la
  * rispetta, salendo di tier solo se resta tempo per arrivare in fondo. Quando
  * il tempo non basta si restituisce il miglior risultato ottenuto, o si fallisce
@@ -56,9 +56,8 @@ const TIER0_TIMEOUT_MS = parseInt(process.env.SCRAPE_TIER0_TIMEOUT_MS || '6000',
 // Il tier 0 si disattiva con SCRAPE_TIER0=off, senza deploy.
 const TIER0_ENABLED = (process.env.SCRAPE_TIER0 || 'on').toLowerCase() !== 'off';
 
-// Budget di default di una singola chiamata. Sotto i dieci secondi delle
-// function sincrone di Netlify, con margine per la risposta.
-const DEFAULT_BUDGET_MS = parseInt(process.env.SCRAPE_REQUEST_BUDGET_MS || '9000', 10);
+// Synchronous Netlify functions allow 60 seconds. Keep time for validation and writes.
+const DEFAULT_BUDGET_MS = parseInt(process.env.SCRAPE_REQUEST_BUDGET_MS || '45000', 10);
 
 // Sotto questo tempo residuo non ha senso avviare Chromium: si spenderebbe
 // tutto il budget nell'avvio, per poi essere troncati durante la navigazione.

@@ -70,3 +70,19 @@ Automated validation: `cd server && npm test`; `cd client && npm run build && np
 The database integration suite runs all migrations on an embedded PostgreSQL engine,
 including rollback injection, concurrent stale checks, preference handling, outbox leases,
 domain reservations and candidate promotion. No production database is needed for tests.
+
+## Reading budget and failure diagnostics
+
+Netlify currently documents 60 seconds for synchronous functions and 30 seconds for
+scheduled functions. Defaults are 45 seconds per API scrape and 26 seconds per worker
+batch (including a 4-second persistence reserve). If an older environment variable
+`SCRAPE_REQUEST_BUDGET_MS=9000` is still configured, remove it to use the default, or
+set it to `45000`. Similarly remove a legacy `SCRAPE_WORKER_BUDGET_MS=20000` override
+when using the new worker default. Do not exceed the platform limit.
+
+A rejected HTTP request followed by insufficient browser time is a budget failure,
+not proof that a retailer cannot be read. The audit stores the actual failure reason,
+HTTP status, attempted tier and elapsed time in `scrape_runs.result.diagnostics`.
+The product page distinguishes timeout and changed configuration from a blocked request.
+A model-wide URL can choose a different SKU/color over time; the pinned SKU must not
+be replaced by that default. Use a stable configuration URL when available.

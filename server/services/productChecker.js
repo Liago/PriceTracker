@@ -7,14 +7,18 @@ function confidenceOf(scraped) {
 }
 async function checkProduct({ product, scrape, repo, now = () => new Date() }) {
 	const startedAt = now();
-	let scraped = null, scrapeError = null, blocked = false;
+	let scraped = null, scrapeError = null, blocked = false, diagnostics = null;
 	try { scraped = await scrape(product.url); } catch (error) {
-		scrapeError = error.message || String(error);
-		blocked = Boolean(error.antiBotSuspected || error.reason?.startsWith('sfida_') || error.message?.includes('CAPTCHA'));
+		diagnostics = { reason: error.reason || null, code: error.code || null, tier: error.tier ?? null,
+			tier0Skipped: error.tier0Skipped || null, antiBotSuspected: Boolean(error.antiBotSuspected),
+			totalMs: error.totalMs ?? null, ...error.evidence };
+		scrapeError = [error.reason, error.message || String(error)].filter(Boolean).join(': ');
+		const budgetFailure = ['budget_insufficiente', 'budget_esaurito', 'budget_speso_nell_avvio', 'navigazione_troncata', 'browser_fallito'].includes(error.reason);
+		blocked = !budgetFailure && Boolean(error.reason === 'pagina_di_sfida' || error.antiBotSuspected || error.reason?.startsWith('sfida_') || error.message?.includes('CAPTCHA'));
 	}
 	const reference = await repo.getReference(product);
 	let reading = evaluatePrice({ scraped, product, history: reference.history, knownOffer: reference.offer });
-	if (scrapeError) Object.assign(reading.validation, { accepted: false, outcome: OUTCOME.QUARANTINED, reasons: [blocked ? 'sito_bloccato' : 'errore_di_scrape'] });
+	if (scrapeError) Object.assign(reading.validation, { accepted: false, outcome: OUTCOME.QUARANTINED, reasons: [blocked ? 'sito_bloccato' : diagnostics?.reason || 'errore_di_scrape'] });
 	if (reading.validation.outcome === OUTCOME.NEEDS_CONFIRMATION) {
 		try {
 			const second = await scrape(product.url, { confirmation: true });
@@ -47,11 +51,11 @@ async function checkProduct({ product, scrape, repo, now = () => new Date() }) {
 			status: blocked ? 'blocked' : validation.accepted ? 'success' : 'quarantined',
 			duration_ms: Math.max(0, Date.now() - startedAt.getTime()), winning_source: confidenceOf(scraped).source,
 			confidence, validation, error_message: scrapeError,
-			result: { price, currency, availability, offer: descriptor }, extractors_ran: scraped?.extractorsRan || [],
+			result: { price, currency, availability, offer: descriptor, diagnostics: diagnostics || scraped?.debug || null }, extractors_ran: scraped?.extractorsRan || [],
 			candidates: (scraped?.candidates || []).map(({ field, value, source, path, weight }) => ({ field, value, source, path, weight })) } });
 	recordCheck({ domain: product.domain, accepted: validation.accepted, confidence, source: confidenceOf(scraped).source, durationMs: Date.now() - startedAt.getTime(), reasons: validation.reasons });
 	return { productId: product.id, price, previousPrice, currency, availability, confidence, confidenceSource: confidenceOf(scraped).source,
 		accepted: validation.accepted, outcome: validation.outcome, reasons: validation.reasons, health: health.health,
-		priceChanged: result.priceChanged, notified: result.notified, offerId: result.offerId, offerKey: descriptor.offerKey, scrapeError };
+		priceChanged: result.priceChanged, notified: result.notified, offerId: result.offerId, offerKey: descriptor.offerKey, scrapeError, diagnostics };
 }
 module.exports = { checkProduct, confidenceOf };

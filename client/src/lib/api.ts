@@ -75,8 +75,17 @@ export function refreshProduct(productId: string) {
 }
 
 /** Stato di salute del tracking, con le ultime osservazioni. */
+export interface ProductHealth {
+  latestRun?: { validation?: { reasons?: string[] }; result?: { diagnostics?: { reason?: string; totalMs?: number } } } | null
+}
 export function getProductHealth(productId: string) {
-  return request(`/products/${productId}/health`)
+  return request<ProductHealth>(`/products/${productId}/health`)
+}
+
+export function trackingMessage(reasons: string[] = []): string | undefined {
+  if (reasons.includes('identita_cambiata')) return 'La pagina mostra una configurazione diversa da quella monitorata. Verifica il link della variante: memoria, colore, condizione e batteria.'
+  if (reasons.some(reason => ['budget_insufficiente', 'budget_esaurito', 'budget_speso_nell_avvio', 'navigazione_troncata'].includes(reason))) return 'La lettura non è terminata nel tempo disponibile. Il prezzo mostrato è l’ultimo verificato; riprova tra poco.'
+  return undefined
 }
 
 /** Segnala un campo estratto male. */

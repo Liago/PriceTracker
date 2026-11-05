@@ -151,11 +151,9 @@ describe('scrapeProduct - una sfida non e’ una pagina senza prezzo', () => {
 });
 
 describe('browserReachable - la configurazione dice la verita’ su se stessa', () => {
-	it('con il budget di una function sincrona il browser non e’ raggiungibile', async () => {
+	it('il budget predefinito lascia spazio a HTTP e browser', async () => {
 		const { browserReachable } = scraperModule;
-		// 9000 di budget contro 6000 di tier 0 piu' 8000 di avvio: non ci sta,
-		// ed e' questo il motivo per cui le pagine difficili danno 503 e non 422.
-		expect(browserReachable()).toBe(false);
+		expect(browserReachable()).toBe(true);
 	});
 });
 
@@ -196,11 +194,11 @@ describe('inspectResult - la regola vale per entrambi i tier', () => {
 describe('browserReachability - i tre gradi, non due', () => {
 	const { browserReachability } = scraperModule;
 
-	it('con i default il browser e’ raggiungibile solo se il tier 0 rinuncia in fretta', () => {
+	it('con i default il browser è raggiungibile anche dopo una GET lenta', () => {
 		// E' il caso osservato in produzione: la GET viene rifiutata con un
 		// blocco in poche centinaia di millisecondi, quindi il residuo basta.
 		// Dire «non parte mai», come faceva la prima versione, era falso.
-		expect(browserReachability().level).toBe('condizionato');
+		expect(browserReachability().level).toBe('sempre');
 	});
 });
 

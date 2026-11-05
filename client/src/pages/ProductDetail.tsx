@@ -10,7 +10,7 @@ import TrackingHealthBadge from '../components/TrackingHealthBadge'
 import PriceFeedbackButton from '../components/PriceFeedbackButton'
 import ConfirmationModal from '../components/ConfirmationModal'
 import PriceHistoryChart from '../components/PriceHistoryChart'
-import { errorMessage, refreshProduct } from '../lib/api'
+import { errorMessage, refreshProduct, getProductHealth, trackingMessage } from '../lib/api'
 import type { PricePoint, PriceHistoryRow, Product } from '../lib/types'
 import { decimalsOf, formatDateTime, priceText, toNumber } from '../lib/format'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
@@ -68,6 +68,7 @@ export default function ProductDetail() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [isImageModalOpen, setIsImageModalOpen] = useState(false)
   const [imageFailed, setImageFailed] = useState(false)
+  const [trackingDetail, setTrackingDetail] = useState<string | undefined>()
 
   useEffect(() => {
     fetchProductAndHistory()
@@ -97,6 +98,9 @@ export default function ProductDetail() {
       if (productError) throw productError
       const loaded = productData as Product
       setProduct(loaded)
+      if (loaded.tracking_health !== 'healthy' && id) {
+        void getProductHealth(id).then(health => setTrackingDetail(trackingMessage(health.latestRun?.validation?.reasons))).catch(() => setTrackingDetail(undefined))
+      } else setTrackingDetail(undefined)
       if (!preserveSettings) {
         setTargetPrice(loaded.target_price != null ? String(loaded.target_price) : '')
         setMonitoringUntil(loaded.monitoring_until || '')
@@ -143,7 +147,7 @@ export default function ProductDetail() {
       const result = await refreshProduct(product.id)
 
       if (!result.accepted) {
-        toast.warning('Aggiornato, ma il prezzo letto non è attendibile: resta quello precedente.')
+        toast.warning(trackingMessage(Array.isArray(result.reasons) ? result.reasons as string[] : []) || 'Il controllo non ha prodotto un prezzo attendibile: resta quello precedente.')
       } else if (result.priceChanged) {
         toast.success(`Prezzo aggiornato: ${result.previousPrice} → ${result.price}`)
       } else {
@@ -293,7 +297,7 @@ export default function ProductDetail() {
 
             <Card>
               <CardContent>
-                <p className="text-label text-muted-foreground">Prezzo attuale</p>
+                <p className="text-label text-muted-foreground">{product.tracking_health === 'healthy' ? 'Prezzo attuale' : 'Ultimo prezzo verificato'}</p>
 
                 {refreshing ? (
                   <div className="mt-2 flex flex-col gap-2" aria-hidden="true">
@@ -334,7 +338,7 @@ export default function ProductDetail() {
 
                 {/* Stato del tracking: distingue "prezzo fermo" da "non
                     riesco piu' a leggere questa pagina". */}
-                <TrackingHealthBadge health={product.tracking_health} className="mt-4" />
+                <TrackingHealthBadge health={product.tracking_health} detail={trackingDetail} className="mt-4" />
 
                 <div className="mt-3">
                   <PriceFeedbackButton productId={product.id} currentPrice={product.current_price} />

@@ -342,6 +342,7 @@ function registerRoutes({ getClient, scrapeImpl = scrapeProduct, checkUrlImpl = 
 					health: outcome.health,
 					reasons: outcome.reasons,
 					priceChanged: outcome.priceChanged,
+					diagnostics: outcome.diagnostics,
 				});
 			} catch (error) {
 				if (error.code === BUDGET_EXCEEDED) return respondIncomplete(res, { error });
@@ -373,7 +374,9 @@ function registerRoutes({ getClient, scrapeImpl = scrapeProduct, checkUrlImpl = 
 					.order('observed_at', { ascending: false })
 					.limit(10);
 
-				res.json({ ...product, recentObservations: observations || [] });
+				const latestRun = requireResult(await client.from('scrape_runs').select('status, error_message, validation, result, created_at')
+					.eq('product_id', product.id).order('created_at', { ascending: false }).limit(1).maybeSingle(), 'Lettura ultimo controllo');
+				res.json({ ...product, recentObservations: observations || [], latestRun });
 			} catch (error) {
 				res.status(500).json({ error: 'Lettura dello stato fallita' });
 			}

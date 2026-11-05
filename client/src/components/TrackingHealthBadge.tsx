@@ -39,8 +39,8 @@ export const HEALTH_STATES: Record<TrackingHealth, HealthState> = {
     Icon: XCircle,
   },
   blocked: {
-    label: 'Sito bloccato',
-    detail: 'Questo sito impedisce la lettura automatica delle pagine.',
+    label: 'Ultima lettura bloccata',
+    detail: 'L’ultima richiesta al negozio è stata bloccata. Il prezzo mostrato è l’ultimo verificato.',
     tone: 'bad',
     Icon: ShieldOff,
   },
@@ -61,16 +61,18 @@ export function needsAttention(health: TrackingHealth | null | undefined): boole
 interface Props {
   health: TrackingHealth | null | undefined
   compact?: boolean
+  detail?: string
   className?: string
 }
 
-export default function TrackingHealthBadge({ health, compact = false, className = '' }: Props) {
+export default function TrackingHealthBadge({ health, compact = false, className = '', detail: diagnosticDetail }: Props) {
   const state = (health && HEALTH_STATES[health]) || HEALTH_STATES.unknown
   const { Icon } = state
+  const detail = diagnosticDetail || state.detail
 
   if (compact) {
     return (
-      <Badge tone={state.tone} title={`${state.label} — ${state.detail}`} className={className}>
+      <Badge tone={state.tone} title={`${state.label} — ${detail}`} className={className}>
         <Icon size={13} aria-hidden="true" className="shrink-0" />
         <span className="truncate">{state.label}</span>
       </Badge>
@@ -89,7 +91,7 @@ export default function TrackingHealthBadge({ health, compact = false, className
     <div className={cn('flex items-start gap-2.5 rounded-[10px] px-3 py-2.5 text-label', toneClass[state.tone], className)}>
       <Icon size={16} className="mt-px shrink-0" aria-hidden="true" />
       <p>
-        <strong className="font-semibold">{state.label}.</strong> {state.detail}
+        <strong className="font-semibold">{state.label}.</strong> {detail}
       </p>
     </div>
   )

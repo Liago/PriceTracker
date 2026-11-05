@@ -20,10 +20,9 @@ const { createTrackingRepository } = require('../../server/services/trackingRepo
 const { scrapeProduct } = require('../../server/services/scraper');
 
 const BATCH_SIZE = parseInt(process.env.SCRAPE_WORKER_BATCH || '5', 10);
-// Netlify concede 26 secondi alle background function e 10 alle normali; si
-// tiene un margine per chiudere il browser e scrivere gli esiti.
-const TIME_BUDGET_MS = parseInt(process.env.SCRAPE_WORKER_BUDGET_MS || '20000', 10);
-const RESERVE_MS = 6000;
+// Scheduled functions allow 30 seconds; reserve time for audit and persistence.
+const TIME_BUDGET_MS = parseInt(process.env.SCRAPE_WORKER_BUDGET_MS || '26000', 10);
+const RESERVE_MS = 4000;
 
 function createWorker({ createClientImpl = createClient, scrapeImpl = scrapeProduct, checkUrlImpl = checkUrl, now = () => Date.now() } = {}) {
 return async () => {
