@@ -16,7 +16,7 @@ describe('Amazon and Swappie regression cases',()=>{
  it('never uses the related SONGMICS price when the SIHOO price is withheld',()=>{
   for(const recipe of [null,{...seeds.seedFor('amazon.it'),success_count:50}]){
    const out=interpret(fixture('amazon/main-price-withheld'),{url:'https://www.amazon.it/dp/B0CTSDG3VD',recipe});
-   expect(out.price).toBeNull();expect(out.priceStatus).toBe('main_price_unavailable');
+   expect(out.price).toBeNull();expect(out.priceStatus).toBe('price_requires_cart');
    expect(evaluatePrice({scraped:out,product:{url:'https://www.amazon.it/dp/B0CTSDG3VD'}}).validation.accepted).toBe(false);
   }
  });

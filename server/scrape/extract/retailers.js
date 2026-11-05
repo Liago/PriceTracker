@@ -35,7 +35,13 @@ function extract(doc) {
 			found = true; break;
 		}
 		add('availability', normalizeAvailability($('#availability, #availabilityInsideBuyBox_feature_div').first().text().trim()), '#availability');
-		if (!found) add('price_status', 'main_price_unavailable', 'buy-box');
+		if (!found) {
+			const buyBox = $('#buybox, #apex_desktop, #desktop_qualifiedBuyBox').clone();
+			buyBox.find('script, style, noscript').remove();
+			const text = buyBox.text().replace(/\s+/g, ' ');
+			const requiresCart = /(?:per (?:visualizzare|vedere).{0,100}aggiungi.{0,60}carrello|add.{0,60}(?:cart|basket).{0,60}(?:see|view).{0,30}price|(?:see|view).{0,30}price.{0,60}(?:cart|basket))/i.test(text);
+			add('price_status', requiresCart ? 'price_requires_cart' : 'main_price_unavailable', 'buy-box');
+		}
 	} else {
 		let state;
 		$('script:not([src])').each((_, el) => {

@@ -271,8 +271,8 @@ function registerRoutes({ getClient, scrapeImpl = scrapeProduct, checkUrlImpl = 
 				if (targetPrice !== null && (!Number.isFinite(targetPrice) || targetPrice <= 0)) return res.status(400).json({ error: 'Prezzo obiettivo non valido' });
 				if (monitoringUntil !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(monitoringUntil) || !Number.isFinite(Date.parse(monitoringUntil)))) return res.status(400).json({ error: 'Data non valida' });
 				const product = await createTrackingRepository(client).createProduct({
-					product: { user_id: user.id, url: policy.url, canonical_url: scraped.canonicalUrl || policy.url,
-						domain: new URL(policy.url).hostname.replace(/^www\./, '').toLowerCase(),
+					product: { user_id: user.id, url: reading.descriptor.url || policy.url, canonical_url: scraped.canonicalUrl || policy.url,
+						domain: new URL(reading.descriptor.url || policy.url).hostname.replace(/^www\./, '').toLowerCase(),
 						name: data.title, image: data.image, description: data.description, current_price: reading.price,
 						currency: reading.currency, availability: reading.availability, target_price: targetPrice, monitoring_until: monitoringUntil,
 						store: data.store, brand: scraped.brand ?? null, sku: scraped.sku ?? null, gtin: scraped.gtin ?? null, details: data.details || {} },

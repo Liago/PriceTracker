@@ -86,3 +86,9 @@ HTTP status, attempted tier and elapsed time in `scrape_runs.result.diagnostics`
 The product page distinguishes timeout and changed configuration from a blocked request.
 A model-wide URL can choose a different SKU/color over time; the pinned SKU must not
 be replaced by that default. Use a stable configuration URL when available.
+
+Amazon prices explicitly withheld until the cart are reported as `price_requires_cart`,
+not a generic scraper error. Other-seller "from" prices are never substituted for
+that offer. No item is added to a cart. Amazon tracking links are normalized to the
+ASIN route while retaining explicit merchant/variant selection; short links retain
+the validated final retailer URL after redirection.

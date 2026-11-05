@@ -45,6 +45,14 @@ function canonicalizeUrl(url) {
 		return null;
 	}
 
+	const amazonAsin = /\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?]|$)/i.exec(parsed.pathname)?.[1];
+	const amazon = /^amazon\.(it|com|co\.uk|de|fr|es)$/.test(parsed.hostname.replace(/^www\./, ''));
+	if (amazon && amazonAsin) {
+		parsed.pathname = `/dp/${amazonAsin.toUpperCase()}`;
+		for (const name of [...parsed.searchParams.keys()]) {
+			if (!VARIANT_PARAMS.includes(name.toLowerCase()) && !['m', 'smid', 'currency'].includes(name.toLowerCase())) parsed.searchParams.delete(name);
+		}
+	}
 	for (const name of [...parsed.searchParams.keys()]) {
 		if (isTrackingParam(name)) parsed.searchParams.delete(name);
 	}

@@ -62,19 +62,21 @@ interface Props {
   health: TrackingHealth | null | undefined
   compact?: boolean
   detail?: string
+  label?: string
   className?: string
 }
 
-export default function TrackingHealthBadge({ health, compact = false, className = '', detail: diagnosticDetail }: Props) {
+export default function TrackingHealthBadge({ health, compact = false, className = '', detail: diagnosticDetail, label: diagnosticLabel }: Props) {
   const state = (health && HEALTH_STATES[health]) || HEALTH_STATES.unknown
   const { Icon } = state
   const detail = diagnosticDetail || state.detail
+  const label = diagnosticLabel || state.label
 
   if (compact) {
     return (
-      <Badge tone={state.tone} title={`${state.label} — ${detail}`} className={className}>
+      <Badge tone={state.tone} title={`${label} — ${detail}`} className={className}>
         <Icon size={13} aria-hidden="true" className="shrink-0" />
-        <span className="truncate">{state.label}</span>
+        <span className="truncate">{label}</span>
       </Badge>
     )
   }
@@ -91,7 +93,7 @@ export default function TrackingHealthBadge({ health, compact = false, className
     <div className={cn('flex items-start gap-2.5 rounded-[10px] px-3 py-2.5 text-label', toneClass[state.tone], className)}>
       <Icon size={16} className="mt-px shrink-0" aria-hidden="true" />
       <p>
-        <strong className="font-semibold">{state.label}.</strong> {detail}
+        <strong className="font-semibold">{label}.</strong> {detail}
       </p>
     </div>
   )

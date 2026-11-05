@@ -6,7 +6,7 @@ const { validatePrice, OUTCOME, REJECT } = require('../scrape/score/validate');
 
 const cents = value => { const n = parsePrice(value); return n === null ? null : Math.round(n * 100); };
 function descriptorOf(scraped, url) {
-	return describeOffer({ ...scraped?.details, ...scraped?.offer, sku: scraped?.sku ?? scraped?.offer?.sku, gtin: scraped?.gtin ?? scraped?.offer?.gtin }, url);
+	return describeOffer({ ...scraped?.details, ...scraped?.offer, sku: scraped?.sku ?? scraped?.offer?.sku, gtin: scraped?.gtin ?? scraped?.offer?.gtin }, scraped?.offer?.url || url);
 }
 function evaluatePrice({ scraped, product = {}, history = [], knownOffer = null, confirmed = false }) {
 	const price = parsePrice(scraped?.priceValue ?? scraped?.price);
@@ -21,7 +21,8 @@ function evaluatePrice({ scraped, product = {}, history = [], knownOffer = null,
 	const problems = [];
 	if (!currency) problems.push('valuta_non_verificata');
 	if (previous === null && !history.length && confidence < 0.85) problems.push(REJECT.LOW_CONFIDENCE);
-	if (scraped?.fields?.price?.meta?.isRange || scraped?.priceStatus) problems.push('offerta_ambigua');
+	if (scraped?.fields?.price?.meta?.isRange) problems.push('offerta_ambigua');
+	if (scraped?.priceStatus) problems.push(scraped.priceStatus);
 	if (scraped?.debug?.degraded) problems.push('lettura_incompleta');
 	if (knownOffer) {
 		for (const key of ['seller', 'condition']) {

@@ -83,6 +83,8 @@ export function getProductHealth(productId: string) {
 }
 
 export function trackingMessage(reasons: string[] = []): string | undefined {
+  if (reasons.includes('price_requires_cart')) return 'Amazon mostra il prezzo di questa offerta solo nel carrello. Il valore mostrato è l’ultimo verificato; i prezzi degli altri venditori non vengono usati al suo posto.'
+  if (reasons.includes('main_price_unavailable')) return 'Amazon non espone un prezzo per l’offerta principale. Il valore mostrato è l’ultimo verificato.'
   if (reasons.includes('identita_cambiata')) return 'La pagina mostra una configurazione diversa da quella monitorata. Verifica il link della variante: memoria, colore, condizione e batteria.'
   if (reasons.some(reason => ['budget_insufficiente', 'budget_esaurito', 'budget_speso_nell_avvio', 'navigazione_troncata'].includes(reason))) return 'La lettura non è terminata nel tempo disponibile. Il prezzo mostrato è l’ultimo verificato; riprova tra poco.'
   return undefined
@@ -106,4 +108,8 @@ export function getDomains() {
 /** Il messaggio leggibile di un errore qualunque. */
 export function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
+}
+
+export function trackingLabel(reasons: string[] = []): string | undefined {
+  return reasons.includes('price_requires_cart') ? 'Prezzo solo nel carrello' : undefined
 }

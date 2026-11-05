@@ -10,7 +10,7 @@ import TrackingHealthBadge from '../components/TrackingHealthBadge'
 import PriceFeedbackButton from '../components/PriceFeedbackButton'
 import ConfirmationModal from '../components/ConfirmationModal'
 import PriceHistoryChart from '../components/PriceHistoryChart'
-import { errorMessage, refreshProduct, getProductHealth, trackingMessage } from '../lib/api'
+import { errorMessage, refreshProduct, getProductHealth, trackingMessage, trackingLabel } from '../lib/api'
 import type { PricePoint, PriceHistoryRow, Product } from '../lib/types'
 import { decimalsOf, formatDateTime, priceText, toNumber } from '../lib/format'
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
@@ -68,7 +68,7 @@ export default function ProductDetail() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [isImageModalOpen, setIsImageModalOpen] = useState(false)
   const [imageFailed, setImageFailed] = useState(false)
-  const [trackingDetail, setTrackingDetail] = useState<string | undefined>()
+  const [trackingReasons, setTrackingReasons] = useState<string[]>([])
 
   useEffect(() => {
     fetchProductAndHistory()
@@ -99,8 +99,8 @@ export default function ProductDetail() {
       const loaded = productData as Product
       setProduct(loaded)
       if (loaded.tracking_health !== 'healthy' && id) {
-        void getProductHealth(id).then(health => setTrackingDetail(trackingMessage(health.latestRun?.validation?.reasons))).catch(() => setTrackingDetail(undefined))
-      } else setTrackingDetail(undefined)
+        void getProductHealth(id).then(health => setTrackingReasons(health.latestRun?.validation?.reasons || [])).catch(() => setTrackingReasons([]))
+      } else setTrackingReasons([])
       if (!preserveSettings) {
         setTargetPrice(loaded.target_price != null ? String(loaded.target_price) : '')
         setMonitoringUntil(loaded.monitoring_until || '')
@@ -338,7 +338,7 @@ export default function ProductDetail() {
 
                 {/* Stato del tracking: distingue "prezzo fermo" da "non
                     riesco piu' a leggere questa pagina". */}
-                <TrackingHealthBadge health={product.tracking_health} detail={trackingDetail} className="mt-4" />
+                <TrackingHealthBadge health={product.tracking_health} detail={trackingMessage(trackingReasons)} label={trackingLabel(trackingReasons)} className="mt-4" />
 
                 <div className="mt-3">
                   <PriceFeedbackButton productId={product.id} currentPrice={product.current_price} />

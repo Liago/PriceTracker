@@ -640,6 +640,7 @@ async function scrapeProduct(url, options = {}) {
 		maxRetries = MAX_RETRIES - 1,
 	} = normalized;
 
+	url = require('../scrape/normalize/offer').canonicalizeUrl(url) || url;
 	const startedAt = Date.now();
 	const deadline = startedAt + budgetMs;
 	const remaining = () => deadline - Date.now();
@@ -694,6 +695,7 @@ async function scrapeProduct(url, options = {}) {
 
 				if (tier0.data) {
 					best = { data: tier0.data, tier: 0 };
+					if (tier0.data.priceStatus === 'price_requires_cart') return withDebug(tier0.data, { url, tier: 0, attempt: 1, startedAt, tier0Skipped: null, evidence });
 					// Abbastanza affidabile: il browser non serve, ed e' il caso
 					// normale per ogni pagina con dati strutturati.
 					if (tier0.data.confidence >= TIER0_THRESHOLD && tier0.data.priceValue !== null) {
