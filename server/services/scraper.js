@@ -607,6 +607,8 @@ function isRetryable(error) {
  * @returns {boolean}
  */
 function shouldSkipTier0({ recipe, allowBrowser, remainingMs }) {
+	// Seeded browser preferences are legacy assumptions, not observed JS requirements.
+	if (recipe?.origin === 'seeded') return false;
 	if (require('../scrape/extract/retailers').retailerOf(`https://${recipe?.domain}`)) return false;
 	if (recipe?.transport !== 'browser') return false;
 	// Il transport e' un'indicazione di costo, non un divieto: si salta la GET

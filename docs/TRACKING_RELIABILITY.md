@@ -92,3 +92,8 @@ not a generic scraper error. Other-seller "from" prices are never substituted fo
 that offer. No item is added to a cart. Amazon tracking links are normalized to the
 ASIN route while retaining explicit merchant/variant selection; short links retain
 the validated final retailer URL after redirection.
+
+Seeded recipes try HTTP before using a browser: legacy `transport=browser` seed data
+does not prove that JavaScript is necessary. Manual browser preferences still apply.
+For structured products, `productID` is retained as an identity fallback when `sku`
+is absent; explicit storage/color become pinned offer attributes on a valid reading.

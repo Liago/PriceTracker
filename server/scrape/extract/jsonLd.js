@@ -193,6 +193,12 @@ function extract(doc) {
 		}
 	}
 
+	if (!node.sku && ['string', 'number'].includes(typeof node.productID)) {
+		candidates.push(candidate({ locator: LOCATOR, field: 'sku', value: String(node.productID).trim(), source: 'jsonld', path: `${path}.productID` }));
+	}
+	const variant = Object.fromEntries(['storage', 'color'].filter(key => typeof node[key] === 'string' && node[key].trim()).map(key => [key, node[key].trim()]));
+	if (Object.keys(variant).length) candidates.push(candidate({ locator: LOCATOR, field: 'variant', value: variant, source: 'jsonld', path }));
+
 	for (const key of ['gtin13', 'gtin12', 'gtin8', 'gtin', 'mpn', 'sku']) {
 		if (node[key]) {
 			candidates.push(candidate({
