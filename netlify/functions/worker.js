@@ -19,12 +19,30 @@ const { checkProduct } = require('../../server/services/productChecker');
 const { createTrackingRepository } = require('../../server/services/trackingRepository');
 const { scrapeProduct } = require('../../server/services/scraper');
 
+const { invokeBackground } = require('../../server/services/importDispatch');
+
 const BATCH_SIZE = parseInt(process.env.SCRAPE_WORKER_BATCH || '5', 10);
 // Scheduled functions allow 30 seconds; reserve time for audit and persistence.
 const TIME_BUDGET_MS = parseInt(process.env.SCRAPE_WORKER_BUDGET_MS || '26000', 10);
 const RESERVE_MS = 4000;
 
-function createWorker({ createClientImpl = createClient, scrapeImpl = scrapeProduct, checkUrlImpl = checkUrl, now = () => Date.now() } = {}) {
+/**
+ * Il lotto in background. Una function schedulata ha 30 secondi: un solo
+ * prodotto che richiede il browser (tier 0 respinto, avvio di Chromium,
+ * attesa del prezzo) se li prendeva quasi tutti, gli altri del lotto venivano
+ * rimandati di giro in giro e quel prodotto stesso finiva spesso troncato. Sono
+ * proprio i negozi «difficili da leggere nel tempo». In background il lotto ha
+ * minuti, e ogni controllo ha un tetto suo perche' una pagina lenta non
+ * consumi il turno degli altri.
+ */
+const BACKGROUND = Object.freeze({
+	batchSize: parseInt(process.env.SCRAPE_BACKGROUND_BATCH || '15', 10),
+	budgetMs: parseInt(process.env.SCRAPE_BACKGROUND_BUDGET_MS || '300000', 10),
+	perJobMs: parseInt(process.env.SCRAPE_BACKGROUND_JOB_MS || '75000', 10),
+});
+
+function createWorker({ createClientImpl = createClient, scrapeImpl = scrapeProduct, checkUrlImpl = checkUrl, now = () => Date.now(),
+	batchSize = BATCH_SIZE, budgetMs = TIME_BUDGET_MS, perJobMs = Infinity } = {}) {
 return async () => {
 	const startedAt = now();
 	const workerId = `worker-${Math.random().toString(36).slice(2, 10)}`;
@@ -41,7 +59,7 @@ return async () => {
 	const processed = [];
 
 	try {
-		const jobs = await queue.claim(workerId, BATCH_SIZE);
+		const jobs = await queue.claim(workerId, batchSize);
 		if (jobs.length === 0) {
 			return { statusCode: 200, body: JSON.stringify({ message: 'coda vuota', workerId }) };
 		}
@@ -49,7 +67,7 @@ return async () => {
 		for (const job of jobs) {
 			// Budget: se non c'e' tempo per un altro controllo si lascia il job
 			// alla prossima invocazione invece di iniziarlo e non finirlo.
-			if (now() - startedAt > TIME_BUDGET_MS - RESERVE_MS) {
+			if (now() - startedAt > budgetMs - RESERVE_MS) {
 				await queue.defer(job, 'budget di tempo esaurito, riaccodato');
 				continue;
 			}
@@ -92,7 +110,7 @@ return async () => {
 						recipe: options.confirmation ? null : recipe,
 						maxRetries: settings.maxRetries,
 						lastKnownPrice: product.current_price ?? null,
-						budgetMs: Math.max(TIME_BUDGET_MS - RESERVE_MS - (now() - startedAt), 2000),
+						budgetMs: Math.max(Math.min(budgetMs - RESERVE_MS - (now() - startedAt), perJobMs), 2000),
 					});
 					return lastResult;
 				};
@@ -127,4 +145,22 @@ return async () => {
 };
 
 }
-module.exports = { createWorker, handler: createWorker() };
+
+/**
+ * La function schedulata avvia il lotto in background e, se l'avvio non
+ * riesce (piano senza background function, deployment locale, rete), lo
+ * esegue qui come prima: nessun controllo resta senza qualcuno che lo faccia.
+ */
+function createScheduledHandler({ invoke = invokeBackground, inline = createWorker() } = {}) {
+	return async () => {
+		try {
+			await invoke('scrape-worker-background', {});
+			return { statusCode: 202, body: JSON.stringify({ dispatched: 'scrape-worker-background' }) };
+		} catch (error) {
+			console.warn(`[Worker] Background non disponibile (${error.message}): lotto eseguito qui`);
+			return inline();
+		}
+	};
+}
+
+module.exports = { createWorker, createScheduledHandler, BACKGROUND, handler: createScheduledHandler() };

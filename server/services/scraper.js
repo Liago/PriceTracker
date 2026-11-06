@@ -616,6 +616,26 @@ function shouldSkipTier0({ recipe, allowBrowser, remainingMs }) {
 }
 
 /**
+ * L'URL da scaricare per una scheda Amazon.
+ *
+ * La canonicalizzazione toglie `psc` perche' non identifica il prodotto, ma
+ * per Amazon significa «variante selezionata»: senza, la scheda di una
+ * variante mostra spesso «Vedi tutte le opzioni d'acquisto» al posto del buy
+ * box, e il prezzo principale non c'e'. L'URL salvato resta quello canonico;
+ * cambia solo la richiesta.
+ */
+function amazonFetchUrl(url) {
+	try {
+		const parsed = new URL(url);
+		if (require('../scrape/extract/retailers').retailerOf(url) !== 'amazon' || !/\/dp\/[A-Z0-9]{10}$/i.test(parsed.pathname)) return url;
+		parsed.searchParams.set('psc', '1');
+		return parsed.toString();
+	} catch {
+		return url;
+	}
+}
+
+/**
  * Scarica e interpreta una pagina prodotto.
  *
  * @param {string} url
@@ -642,7 +662,7 @@ async function scrapeProduct(url, options = {}) {
 		maxRetries = MAX_RETRIES - 1,
 	} = normalized;
 
-	url = require('../scrape/normalize/offer').canonicalizeUrl(url) || url;
+	url = amazonFetchUrl(require('../scrape/normalize/offer').canonicalizeUrl(url) || url);
 	const startedAt = Date.now();
 	const deadline = startedAt + budgetMs;
 	const remaining = () => deadline - Date.now();
@@ -877,6 +897,7 @@ module.exports = {
 	browserReachability,
 	browserBudgetNeeded,
 	shouldSkipTier0,
+	amazonFetchUrl,
 	retryDelay,
 	inspectResult,
 	BUDGET_EXCEEDED,

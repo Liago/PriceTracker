@@ -5,6 +5,14 @@ const { recordCheck } = require('../scrape/telemetry');
 function confidenceOf(scraped) {
 	return { confidence: Number.isFinite(scraped?.confidence) ? scraped.confidence : 0, source: scraped?.fields?.price?.source ?? 'pipeline' };
 }
+/** La lettura precedente diceva gia' lo stesso prezzo, respinto solo perche' da confermare? */
+function confirmedOverTime(reading, recent = []) {
+	const last = (recent || [])[0];
+	if (!last || last.accepted || last.price == null || reading.price == null) return false;
+	const reasons = String(last.rejectReason || '').split(',').filter(Boolean);
+	if (!reasons.length || reasons.some(reason => reason !== REJECT.DELTA_IMPLAUSIBLE)) return false;
+	return cents(last.price) === cents(reading.price) && (!last.currency || last.currency === reading.currency);
+}
 async function checkProduct({ product, scrape, repo, now = () => new Date() }) {
 	const startedAt = now();
 	let scraped = null, scrapeError = null, blocked = false, diagnostics = null;
@@ -30,6 +38,16 @@ async function checkProduct({ product, scrape, repo, now = () => new Date() }) {
 				reading = secondReading; scraped = second;
 			}
 		} catch { /* Keep a rejected observation; never replace the last good price. */ }
+	}
+	// Conferma nel tempo. La seconda lettura nello stesso controllo rilegge la
+	// stessa fonte e quasi mai risulta «indipendente», e lo storico di
+	// riferimento contiene solo prezzi accettati: un cambio vero oltre la soglia
+	// restava respinto per sempre. Lo stesso prezzo, stessa valuta e stessa
+	// offerta, gia' letto e respinto solo per la variazione al controllo
+	// precedente, e' la conferma che mancava.
+	if (reading.validation.outcome === OUTCOME.NEEDS_CONFIRMATION && confirmedOverTime(reading, reference.recent)) {
+		const confirmedReading = evaluatePrice({ scraped, product, history: reference.history, knownOffer: reference.offer, confirmed: true });
+		if (confirmedReading.validation.accepted) reading = confirmedReading;
 	}
 	const { price, currency, availability, confidence, validation } = reading;
 	// A failed scrape retains the pinned offer; it must not invent a new default offer.
@@ -58,4 +76,4 @@ async function checkProduct({ product, scrape, repo, now = () => new Date() }) {
 		accepted: validation.accepted, outcome: validation.outcome, reasons: validation.reasons, health: health.health,
 		priceChanged: result.priceChanged, notified: result.notified, offerId: result.offerId, offerKey: descriptor.offerKey, scrapeError, diagnostics };
 }
-module.exports = { checkProduct, confidenceOf };
+module.exports = { checkProduct, confidenceOf, confirmedOverTime };

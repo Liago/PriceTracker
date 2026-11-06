@@ -145,3 +145,39 @@ on Netlify. No product or price history is created for a rejected first reading.
 This removes the long silent connection responsible for intermediary inactivity
 timeouts during addition. It does not guarantee that a retailer will supply a
 verifiable price: those failures remain explicit results rather than HTML 504s.
+
+## Correzioni: aggiunta Amazon e letture nel tempo
+
+- **Prezzo Amazon con `.a-offscreen` vuoto.** Il markup attuale del prezzo da
+  pagare lascia spesso vuoto `.a-offscreen` e scrive il prezzo nei nodi
+  `a-price-whole`/`a-price-fraction`/`a-price-symbol`. L'estrattore leggeva
+  solo il primo: ogni scheda risultava `main_price_unavailable` e l'aggiunta
+  falliva. Ora il prezzo si ricompone dai nodi visibili, con gli stessi filtri
+  (barrati, prezzo consigliato, abbonamento, rate). La readiness del browser
+  usa lo stesso criterio, invece di attendere 8 secondi e chiudere con
+  `prezzo_non_caricato`.
+- **`psc=1` nella richiesta Amazon.** La canonicalizzazione lo toglie dall'URL
+  salvato, ma per Amazon indica la variante selezionata: senza, la scheda di
+  una variante puo' non mostrare il buy box. Si aggiunge solo all'URL scaricato.
+- **Avvio delle background function.** `dispatchImport` non richiede piu'
+  `NETLIFY=true`, garantita in build ma non a runtime: se mancava, nessuna
+  aggiunta partiva e il client attendeva fino al proprio timeout. Il job di
+  aggiunta ha un budget di 120 s (`SCRAPE_IMPORT_BUDGET_MS`), non i 45 s della
+  richiesta sincrona.
+- **Controlli programmati in background.** La function schedulata `worker`
+  avvia `scrape-worker-background` (lotto `SCRAPE_BACKGROUND_BATCH`=15, budget
+  `SCRAPE_BACKGROUND_BUDGET_MS`=300000, tetto per prodotto
+  `SCRAPE_BACKGROUND_JOB_MS`=75000). Se l'avvio non riesce esegue il lotto da
+  se' con i limiti di prima. Nei 30 secondi di una function schedulata un solo
+  prodotto che richiede il browser consumava il lotto.
+- **Conferma nel tempo.** Una variazione oltre il 60% con confidenza sotto
+  0,90 richiede conferma; la seconda lettura nello stesso controllo rilegge la
+  stessa fonte e non risultava quasi mai indipendente, mentre lo storico di
+  riferimento contiene solo prezzi accettati. Il prodotto restava fermo sul
+  vecchio prezzo per sempre. Ora lo stesso prezzo (stessa valuta, stessa
+  offerta) gia' respinto solo per la variazione al controllo precedente vale
+  come conferma.
+
+Le background function richiedono un piano Netlify che le includa: verificare
+nei log che `worker` risponda `202` e che `scrape-worker-background` compaia
+fra le function invocate. Nessuna nuova migrazione.

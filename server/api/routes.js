@@ -36,8 +36,8 @@ const { evaluatePrice } = require('../services/evaluatePrice');
  * @param {number} startedAt - Date.now() a inizio richiesta
  * @returns {number} millisecondi, mai negativi
  */
-function remainingBudget(startedAt) {
-	return Math.max(DEFAULT_BUDGET_MS - (Date.now() - startedAt), 1000);
+function remainingBudget(startedAt, budgetMs = DEFAULT_BUDGET_MS) {
+	return Math.max(budgetMs - (Date.now() - startedAt), 1000);
 }
 
 /**
@@ -448,7 +448,7 @@ function registerRoutes({ getClient, scrapeImpl = scrapeProduct, checkUrlImpl = 
 
 
 /** Shared validation and persistence for synchronous and background additions. */
-async function createProductRequest({ client, user, body, scrapeImpl = scrapeProduct, checkUrlImpl = checkUrl, createProductImpl }, res) {
+async function createProductRequest({ client, user, body, scrapeImpl = scrapeProduct, checkUrlImpl = checkUrl, createProductImpl, budgetMs = DEFAULT_BUDGET_MS }, res) {
 	const { url, targetPrice = null, monitoringUntil = null } = body || {};
 	const startedAt = Date.now();
 
@@ -460,7 +460,7 @@ async function createProductRequest({ client, user, body, scrapeImpl = scrapePro
 
 		const recipes = createRecipeStore({ client });
 		const recipe = await recipes.getActiveRecipe(policy.url);
-		const scraped = await scrapeImpl(policy.url, { recipe, budgetMs: remainingBudget(startedAt) });
+		const scraped = await scrapeImpl(policy.url, { recipe, budgetMs: remainingBudget(startedAt, budgetMs) });
 		const data = normalizeScrapeResult(scraped, policy.url);
 
 		const reading = evaluatePrice({ scraped, product: { url: policy.url } });

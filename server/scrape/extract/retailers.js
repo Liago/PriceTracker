@@ -12,6 +12,40 @@ function retailerOf(url) {
 	} catch { /* Not a retailer URL. */ }
 	return null;
 }
+/**
+ * Il testo di un nodo prezzo Amazon.
+ *
+ * Per un contenitore `.a-price` si preferisce `.a-offscreen`, il testo per
+ * l'accessibilita'; quando e' vuoto si ricompone il prezzo dai nodi visibili.
+ * Le cifre della parte intera si ripuliscono dai separatori delle migliaia e
+ * si uniscono ai decimali con un punto, cosi' "1.299," + "99" diventa
+ * "1299.99" senza ambiguita' di locale.
+ */
+function amazonPriceText($, el) {
+	const node = $(el);
+	if (!node.is('.a-price')) return node.text();
+	const offscreen = node.find('.a-offscreen').first().text().replace(/\s+/g, ' ').trim();
+	if (/\d/.test(offscreen)) return offscreen;
+	const whole = node.find('.a-price-whole').first().text().replace(/\D/g, '');
+	if (!whole) return offscreen;
+	const fraction = node.find('.a-price-fraction').first().text().replace(/\D/g, '');
+	const symbol = node.find('.a-price-symbol').first().text().trim();
+	return `${whole}${fraction ? `.${fraction}` : ''} ${symbol}`.trim();
+}
+
+/** Valuta dal simbolo, oppure dal dominio quando il simbolo manca. */
+function currencyOf(text, url) {
+	if (/€|EUR/.test(text)) return 'EUR';
+	if (/£|GBP/.test(text)) return 'GBP';
+	if (/\$|USD/.test(text)) return 'USD';
+	try {
+		const host = new URL(url).hostname;
+		if (/amazon\.(it|de|fr|es)$/.test(host)) return 'EUR';
+		if (/amazon\.co\.uk$/.test(host)) return 'GBP';
+		if (/amazon\.com$/.test(host)) return 'USD';
+	} catch { /* URL non valido: nessuna valuta. */ }
+	return null;
+}
 function extract(doc) {
 	const retailer = retailerOf(doc.url);
 	if (!retailer) return null;
@@ -23,13 +57,20 @@ function extract(doc) {
 		add('image', $('#landingImage').attr('src') || doc.meta('og:image'), '#landingImage');
 		const asin = /\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?]|$)/i.exec(doc.url)?.[1];
 		if (asin) add('sku', asin.toUpperCase(), 'url:asin');
+		// Ogni voce indica un nodo prezzo, non il suo testo: Amazon scrive il
+		// prezzo da pagare su piu' nodi (a-price-whole, a-price-fraction,
+		// a-price-symbol) e lascia sempre piu' spesso vuoto `.a-offscreen`.
+		// Leggere solo quest'ultimo scartava come «non interpretabile» il
+		// prezzo principale di pagine perfettamente leggibili.
 		const selectors = [
-			'#corePriceDisplay_desktop_feature_div .priceToPay .a-offscreen',
-			'#corePriceDisplay_desktop_feature_div .a-price .a-offscreen',
-			'#corePrice_feature_div .a-price .a-offscreen',
-			'#corePrice_desktop_feature_div .priceToPay .a-offscreen',
-			'#corePrice_desktop_feature_div .a-price .a-offscreen',
-			'#apex_desktop .priceToPay .a-offscreen',
+			'#corePriceDisplay_desktop_feature_div .priceToPay',
+			'#corePriceDisplay_desktop_feature_div .a-price',
+			'#corePrice_feature_div .a-price',
+			'#corePrice_desktop_feature_div .priceToPay',
+			'#corePrice_desktop_feature_div .a-price',
+			'#apex_desktop .priceToPay',
+			'#apex_offerDisplay_desktop .priceToPay',
+			'#corePriceDisplay_mobile_feature_div .priceToPay',
 			'#priceblock_ourprice', '#priceblock_dealprice', '#price_inside_buybox', '#newBuyBoxPrice',
 		];
 		let found = false;
@@ -39,7 +80,7 @@ function extract(doc) {
 			const prices = [];
 			$(selector).each((_, el) => {
 				attempt.matched++;
-				const text = $(el).text(), price = parsePrice(text);
+				const text = amazonPriceText($, el), price = parsePrice(text);
 				const reasons = [
 					isStruck($, el) && 'struck', isHidden($, el) && 'hidden',
 					isOffTopic($, el) && 'off_topic', hasAccessoryAncestor($, el) && 'accessory',
@@ -55,7 +96,7 @@ function extract(doc) {
 			if (!prices.length) continue;
 			if (new Set(prices.map(x => x.price)).size !== 1) break;
 			add('price', prices[0].price, selector);
-			add('currency', /€|EUR/.test(prices[0].text) ? 'EUR' : /£|GBP/.test(prices[0].text) ? 'GBP' : /\$|USD/.test(prices[0].text) ? 'USD' : null, selector);
+			add('currency', currencyOf(prices[0].text, doc.url), selector);
 			found = true; break;
 		}
 		add('availability', normalizeAvailability($('#availability, #availabilityInsideBuyBox_feature_div').first().text().trim()), '#availability');
@@ -65,7 +106,7 @@ function extract(doc) {
 			const text = buyBox.text().replace(/\s+/g, ' ');
 			const requiresCart = /(?:per (?:visualizzare|vedere).{0,100}aggiungi.{0,60}carrello|add.{0,60}(?:cart|basket).{0,60}(?:see|view).{0,30}price|(?:see|view).{0,30}price.{0,60}(?:cart|basket))/i.test(text);
 			// Bounded price-only evidence: no full page, scripts, reviews or session attributes.
-			const roots = ['#corePriceDisplay_desktop_feature_div', '#corePrice_feature_div', '#corePrice_desktop_feature_div', '#apex_desktop', '#buybox', '#desktop_qualifiedBuyBox'];
+			const roots = ['#corePriceDisplay_desktop_feature_div', '#corePrice_feature_div', '#corePrice_desktop_feature_div', '#apex_desktop', '#apex_offerDisplay_desktop', '#corePriceDisplay_mobile_feature_div', '#buybox', '#desktop_qualifiedBuyBox'];
 			const priceNodes = $(roots.map(root => `${root} .a-price`).join(', ')).slice(0, 12).toArray().map(el => {
 				const node = $(el).clone();
 				node.find('script, style, noscript').remove();

@@ -2,6 +2,11 @@ const { randomUUID } = require('node:crypto');
 const { requireResult } = require('./trackingRepository');
 const { canonicalizeUrl } = require('../scrape/normalize/offer');
 
+// Una background function di Netlify dura fino a 15 minuti: il limite di 45s
+// della richiesta sincrona qui non serve e toglieva il tempo per il browser e
+// per un secondo tentativo proprio ai siti che ne hanno bisogno.
+const IMPORT_BUDGET_MS = parseInt(process.env.SCRAPE_IMPORT_BUDGET_MS || '120000', 10);
+
 async function enqueueImport(client, userId, body) {
 	const invalid = message => { throw Object.assign(new Error(message), { status: 400 }); };
 	let url;
@@ -24,7 +29,7 @@ async function processImport(client, jobId, dependencies = {}) {
 		const { createProductRequest } = require('../api/routes');
 		let status = 200, response;
 		const res = { status(code) { status = code; return this; }, json(body) { response = body; return this; } };
-		await createProductRequest({ client, user: { id: job.user_id }, body: job.request, ...dependencies,
+		await createProductRequest({ client, user: { id: job.user_id }, body: job.request, budgetMs: IMPORT_BUDGET_MS, ...dependencies,
 			createProductImpl: async ({product, descriptor, observation}) => requireResult(await client.rpc('finish_product_import', {
 				p_id: job.id, p_lease_id: job.lease_id, p_product: product, p_offer: descriptor, p_observation: observation,
 			}), 'Completamento aggiunta') }, res);
