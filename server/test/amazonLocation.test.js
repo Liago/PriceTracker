@@ -114,5 +114,23 @@ describe('posizione di consegna Amazon', () => {
 		expect(out.updated).toBe(false);
 		expect(out.steps[0]).toContain('indirizzo_rifiutato');
 	});
+	it('una ricarica lenta dopo il cambio confermato non annulla il cambio e non ripete il clic', async () => {
+		const page = fakePage({ confirm: false });
+		const win = page.dom.window;
+		win.document.body.insertAdjacentHTML('beforeend', `<span id="nav-global-location-data-modal-action" data-a-modal='{"url":"/m","ajaxHeaders":{}}'></span>`);
+		win.fetch = async target => (String(target) === '/m'
+			? { ok: true, status: 200, text: async () => 'CSRF_TOKEN : "T"' }
+			: { ok: true, status: 200, json: async () => ({ isValidAddress: 1, isAddressUpdated: 1 }) });
+		const reloadDone = page.reload;
+		page.reload = vi.fn(async options => {
+			await reloadDone();
+			throw Object.assign(new Error(`Navigation timeout of ${options.timeout} ms exceeded`), { name: 'TimeoutError' });
+		});
+		const out = await scraper.setAmazonDeliveryLocation(page, url, 40000);
+		expect(out).toMatchObject({ updated: true, method: 'api', error: null, after: 'Milano 20121' });
+		expect(page.reload.mock.calls[0][0].timeout).toBeGreaterThan(10000);
+		expect(out.steps.at(-1)).toContain('ricarica: timeout');
+		expect(page.typed).toEqual([]);
+	});
 });
 

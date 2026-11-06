@@ -705,19 +705,41 @@ async function setAmazonDeliveryLocation(page, url, budgetMs) {
 	const zip = process.env.AMAZON_DELIVERY_ZIP || AMAZON_ZIP[host];
 	const result = { before: await readLocation(), after: null, zip: zip || null, updated: false, method: null, error: null, steps: [] };
 	if (!zip) return { ...result, error: 'non_supportato' };
+	const startedAt = Date.now();
+	const left = () => budgetMs - (Date.now() - startedAt);
 	const step = Math.max(1500, Math.min(5000, Math.floor(budgetMs / 4)));
 	const withTimeout = (promise, ms) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error('timeout'), { name: 'TimeoutError' })), ms))]);
+
+	// Il cambio e' gia' avvenuto quando Amazon lo conferma: la ricarica serve
+	// solo a vedere la scheda con la nuova posizione. Una scheda pesante puo'
+	// impiegarci piu' di dieci secondi, e un timeout qui non annulla il cambio:
+	// si legge cio' che e' arrivato, come per la navigazione iniziale.
 	const reload = async method => {
-		await page.reload({ waitUntil: 'domcontentloaded', timeout: step * 2 });
+		const timeout = Math.max(5000, Math.min(30000, left() - 9000));
+		try {
+			await page.reload({ waitUntil: 'domcontentloaded', timeout });
+			result.steps.push(`ricarica ok`);
+		} catch (error) {
+			if (error.name !== 'TimeoutError') throw error;
+			result.steps.push(`ricarica: timeout dopo ${timeout}ms, leggo la pagina caricata`);
+		}
 		return { ...result, after: await readLocation(), updated: true, method, error: null };
 	};
 
+	let api = null;
 	try {
-		const api = await withTimeout(page.evaluate(amazonAddressChange, zip), step * 2);
+		api = await withTimeout(page.evaluate(amazonAddressChange, zip), step * 2);
 		result.steps.push(api.step + (api.body ? ` ${api.body}` : ''));
-		if (api.ok) return await reload('api');
 	} catch (error) {
 		result.steps.push(`api: ${error.name === 'TimeoutError' ? 'timeout' : error.message.slice(0, 80)}`);
+	}
+	if (api?.ok) {
+		try {
+			return await reload('api');
+		} catch (error) {
+			// La posizione e' cambiata comunque: ripetere il clic non servirebbe.
+			return { ...result, after: await readLocation(), updated: true, method: 'api', error: `ricarica: ${error.message.slice(0, 80)}` };
+		}
 	}
 
 	if (typeof page.waitForSelector !== 'function') return { ...result, error: result.steps.at(-1) || 'non_supportato' };
