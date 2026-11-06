@@ -286,8 +286,8 @@ function inspectResult(data, inspection) {
  * @param {object} context - { recipe, lastKnownPrice, timeoutMs, fetchHtmlImpl }
  * @returns {Promise<{data: object|null, skipped: string|null, antiBotSuspected: boolean, durationMs: number}>}
  */
-async function runTier0(url, { recipe, lastKnownPrice, timeoutMs, fetchHtmlImpl = fetchHtml }) {
-	const fetched = await fetchHtmlImpl(url, { timeoutMs });
+async function runTier0(url, { recipe, lastKnownPrice, timeoutMs, fetchHtmlImpl = fetchHtml, session = null }) {
+	const fetched = await fetchHtmlImpl(url, { timeoutMs, ...(session ? { session } : {}) });
 
 	if (!fetched.ok) {
 		// Lo status fa la differenza fra «mi ha risposto 403» e «non ha risposto»,
@@ -355,14 +355,16 @@ async function runTier0(url, { recipe, lastKnownPrice, timeoutMs, fetchHtmlImpl 
  * @param {object} context
  * @returns {Promise<object>} risultato interpretato
  */
-async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, createBrowserImpl = createBrowser }) {
+async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, createBrowserImpl = createBrowser, session = null, sessions = null, sessionKey = null }) {
 	let browser = null;
 	const proxy = proxyManager.hasProxies() ? proxyManager.getRandomProxy() : null;
 
 	try {
 		// Get User-Agent for this request
+		// Con una sessione salvata si torna con lo stesso browser che l'ha
+		// aperta: Amazon lega la posizione di consegna a quella sessione.
 		const userAgent = attempt === 0
-			? userAgentManager.getUserAgentForUrl(url)
+			? (session?.userAgent || userAgentManager.getUserAgentForUrl(url))
 			: userAgentManager.getNextUserAgent(); // Use different UA on retry
 
 		console.log(`[Scraper] Attempt ${attempt + 1}/${MAX_RETRIES} for ${url}`);
@@ -427,6 +429,11 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, create
 
 		// Let the retailer establish its own session; invented session cookies
 		// can leave the product shell and purchase widgets in different sessions.
+		// The only cookies set here are ones the retailer itself issued, saved
+		// after a successful delivery-location change.
+		if (session?.cookies?.length && typeof page.setCookie === 'function') {
+			await page.setCookie(...session.cookies).catch(error => console.warn(`[Scraper] Cookie di sessione non applicati: ${error.message}`));
+		}
 
 		// Navigate with timeout handling. Il timeout e' quello che resta del
 		// budget, non un valore fisso: un'attesa di trenta secondi dentro una
@@ -529,6 +536,12 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, create
 			if (delivery.updated) {
 				({ budget: readinessBudget, timedOut: priceReadinessTimedOut } = await waitForProduct());
 				data = read(await page.content());
+				// La sessione ora consegna in Italia: si conserva per le letture
+				// successive, che cosi' non ripetono il cambio di CAP.
+				if (sessions && sessionKey && data.price != null && typeof page.cookies === 'function') {
+					const saved = await sessions.save(sessionKey, { cookies: await page.cookies().catch(() => []), userAgent, location: delivery.after });
+					if (saved) console.log(`[Scraper] Sessione ${sessionKey} salvata (${saved.cookies.length} cookie, scade ${saved.expiresAt})`);
+				}
 			}
 		}
 
@@ -808,6 +821,7 @@ async function scrapeProduct(url, options = {}) {
 		createBrowserImpl = createBrowser,
 		maxRetries = MAX_RETRIES - 1,
 		resolveShortLinkImpl = resolveAmazonShortLink,
+		sessions = null,
 	} = normalized;
 
 	url = await resolveShortLinkImpl(url);
@@ -816,7 +830,11 @@ async function scrapeProduct(url, options = {}) {
 	const deadline = startedAt + budgetMs;
 	const remaining = () => deadline - Date.now();
 
-	const context = { recipe, lastKnownPrice, createBrowserImpl };
+	const { sessionKey: keyFor } = require('../scrape/retailerSessions');
+	const sessionKey = sessions ? keyFor(url) : null;
+	const session = sessionKey ? await sessions.get(sessionKey).catch(() => null) : null;
+	if (session) console.log(`[Scraper] Riuso la sessione ${sessionKey} (posizione "${session.location}")`);
+	const context = { recipe, lastKnownPrice, createBrowserImpl, session, sessions, sessionKey };
 
 	/** Il miglior risultato ottenuto finora, da restituire se il budget finisce. */
 	let best = null;

@@ -20,6 +20,7 @@ const { createTrackingRepository } = require('../../server/services/trackingRepo
 const { scrapeProduct } = require('../../server/services/scraper');
 
 const { invokeBackground } = require('../../server/services/importDispatch');
+const { createSessionStore } = require('../../server/scrape/retailerSessions');
 
 const BATCH_SIZE = parseInt(process.env.SCRAPE_WORKER_BATCH || '5', 10);
 // Scheduled functions allow 30 seconds; reserve time for audit and persistence.
@@ -55,6 +56,7 @@ return async () => {
 	const queue = createJobQueue({ client });
 	const recipes = createRecipeStore({ client });
 	const repo = createTrackingRepository(client);
+	const sessions = createSessionStore(client);
 
 	const processed = [];
 
@@ -110,6 +112,7 @@ return async () => {
 						recipe: options.confirmation ? null : recipe,
 						maxRetries: settings.maxRetries,
 						lastKnownPrice: product.current_price ?? null,
+						sessions,
 						budgetMs: Math.max(Math.min(budgetMs - RESERVE_MS - (now() - startedAt), perJobMs), 2000),
 					});
 					return lastResult;

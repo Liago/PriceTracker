@@ -65,8 +65,8 @@ const ANTI_BOT_STATUSES = new Set([401, 403, 405, 406, 429, 503]);
  * @param {string} url
  * @returns {object}
  */
-function browserHeaders(url) {
-	const userAgent = userAgentManager.getUserAgentForUrl(url);
+function browserHeaders(url, forcedUserAgent = null) {
+	const userAgent = forcedUserAgent || userAgentManager.getUserAgentForUrl(url);
 	const chromeVersion = /Firefox/.test(userAgent) ? null : /Chrome\/(\d+)/.exec(userAgent);
 	const isEdge = /Edg\//.test(userAgent);
 
@@ -163,7 +163,11 @@ async function fetchHtml(url, options = {}) {
 		timeoutMs = DEFAULT_TIMEOUT_MS,
 		fetchImpl = fetch,
 		checkUrlImpl = checkUrl,
+		// Sessione del retailer (cookie e User-Agent emessi da lui): i cookie
+		// vanno solo agli host del suo dominio, rivalutati a ogni redirect.
+		session = null,
 	} = options;
+	const { cookieHeader } = require('./retailerSessions');
 
 	const startedAt = Date.now();
 	const elapsed = () => Date.now() - startedAt;
@@ -185,7 +189,11 @@ async function fetchHtml(url, options = {}) {
 		try {
 			response = await fetchImpl(policy.url, {
 				method: 'GET',
-				headers: browserHeaders(policy.url),
+				headers: (() => {
+					const headers = browserHeaders(policy.url, session?.userAgent || null);
+					const cookie = cookieHeader(session, policy.url);
+					return cookie ? { ...headers, Cookie: cookie } : headers;
+				})(),
 				redirect: 'manual',
 				signal: AbortSignal.timeout(remaining),
 			});

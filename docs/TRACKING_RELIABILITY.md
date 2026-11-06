@@ -197,3 +197,20 @@ fra le function invocate. Nessuna nuova migrazione.
 - `diagnostics.priceExtraction.page` riporta posizione mostrata da Amazon,
   disponibilita', testo del buy box, contenitori presenti e prezzi con il loro
   contenitore: dice perche' il prezzo manca senza dover catturare la pagina.
+
+## Sessione Amazon con posizione italiana (migrazione 014, facoltativa)
+
+Dopo un cambio di CAP riuscito, il browser conserva i cookie emessi da Amazon e
+lo User-Agent di quella sessione (`retailer_sessions`, solo service role,
+scadenza `RETAILER_SESSION_TTL_MS`, default 12 ore). Le letture successive li
+riusano: la lettura HTTP vede gia' la posizione italiana e, se trova il prezzo,
+il browser non parte. Quando la sessione non basta piu' (Amazon torna a
+vederci negli Stati Uniti), il browser rifa' il cambio di CAP e la sostituisce.
+
+`014_retailer_sessions.sql` non cambia `tracking_schema_version` e il deploy
+non la richiede: senza tabella le sessioni restano in memoria nel container
+(riuso solo fra invocazioni dello stesso container) e il log lo segnala una
+volta con `[Sessioni] Tabella retailer_sessions non disponibile`.
+
+Nei log: `Riuso la sessione amazon.it` all'inizio di una lettura e
+`Sessione amazon.it salvata (N cookie, scade …)` dopo un cambio di CAP.

@@ -24,6 +24,7 @@ const { learnRecipe } = require('../scrape/recipe/learner');
 const { requireResult } = require('../services/trackingRepository');
 const { normalizeUserSettings } = require('../services/userSettings');
 const { evaluatePrice } = require('../services/evaluatePrice');
+const { createSessionStore } = require('../scrape/retailerSessions');
 
 /**
  * Quanto tempo resta allo scrape.
@@ -316,6 +317,7 @@ function registerRoutes({ getClient, scrapeImpl = scrapeProduct, checkUrlImpl = 
 						maxRetries: userSettings.maxRetries,
 						lastKnownPrice: product.current_price,
 						budgetMs: remainingBudget(startedAt),
+						sessions: createSessionStore(client),
 					});
 					return lastResult;
 				};
@@ -461,7 +463,7 @@ async function createProductRequest({ client, user, body, scrapeImpl = scrapePro
 
 		const recipes = createRecipeStore({ client });
 		const recipe = await recipes.getActiveRecipe(policy.url);
-		const scraped = await scrapeImpl(policy.url, { recipe, budgetMs: remainingBudget(startedAt, budgetMs) });
+		const scraped = await scrapeImpl(policy.url, { recipe, budgetMs: remainingBudget(startedAt, budgetMs), sessions: createSessionStore(client) });
 		const data = normalizeScrapeResult(scraped, policy.url);
 
 		const reading = evaluatePrice({ scraped, product: { url: policy.url } });
