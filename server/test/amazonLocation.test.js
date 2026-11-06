@@ -43,7 +43,7 @@ describe('posizione di consegna Amazon', () => {
 		const typed = [];
 		return {
 			typed, dom,
-			evaluate: async fn => dom.window.eval(`(${fn.toString()})`)(),
+			evaluate: async (fn, arg) => dom.window.eval(`(${fn.toString()})`)(arg),
 			waitForSelector: async selector => { if (!doc.querySelector(selector)) throw Object.assign(new Error('x'), { name: 'TimeoutError' }); },
 			type: async (selector, text) => { typed.push(text); doc.querySelector(selector).value = text; },
 			waitForResponse: async () => (confirm ? { ok: () => true, status: () => 200, url: () => 'https://www.amazon.it/portal-migration/hz/glow/address-change' } : null),
@@ -85,6 +85,34 @@ describe('posizione di consegna Amazon', () => {
 			createBrowserImpl: async () => ({ newPage: async () => page, close: async () => {} }) });
 		expect(out.price).toBe(19.99);
 		expect(out.debug.deliveryLocation).toMatchObject({ before: 'Stati Uniti', updated: true });
+	});
+	it('cambia la posizione con le chiamate del selettore, senza dipendere dal pulsante', async () => {
+		const page = fakePage({ confirm: false });
+		const win = page.dom.window;
+		win.document.body.insertAdjacentHTML('beforeend', `<span id="nav-global-location-data-modal-action" data-a-modal='{"url":"/portal-migration/hz/glow/get-rendered-address-selections?deviceType=desktop&pageType=Detail&storeContext=beauty","ajaxHeaders":{"anti-csrftoken-a2z":"MODAL"}}'></span>`);
+		const calls = [];
+		win.fetch = async (target, options = {}) => {
+			calls.push({ target, options });
+			if (String(target).includes('get-rendered-address-selections')) return { ok: true, status: 200, text: async () => '<script>P.when("A").execute(function(A){ var CSRF_TOKEN : "ADDRESS"; })</script>' };
+			return { ok: true, status: 200, json: async () => ({ isValidAddress: 1, isAddressUpdated: 1 }) };
+		};
+		const out = await scraper.setAmazonDeliveryLocation(page, url, 20000);
+		expect(out).toMatchObject({ updated: true, method: 'api', after: 'Milano 20121' });
+		expect(calls[0].options.headers['anti-csrftoken-a2z']).toBe('MODAL');
+		expect(calls[1].options.headers['anti-csrftoken-a2z']).toBe('ADDRESS');
+		expect(JSON.parse(calls[1].options.body)).toMatchObject({ zipCode: '20121', storeContext: 'beauty', locationType: 'LOCATION_INPUT' });
+		expect(page.typed).toEqual([]);
+	});
+	it('un indirizzo rifiutato da Amazon non viene dato per applicato', async () => {
+		const page = fakePage({ confirm: false });
+		const win = page.dom.window;
+		win.document.body.insertAdjacentHTML('beforeend', `<span id="nav-global-location-data-modal-action" data-a-modal='{"url":"/m","ajaxHeaders":{}}'></span>`);
+		win.fetch = async target => (String(target) === '/m'
+			? { ok: true, status: 200, text: async () => 'CSRF_TOKEN : "T"' }
+			: { ok: true, status: 200, json: async () => ({ isValidAddress: 0, isAddressUpdated: 0 }) });
+		const out = await scraper.setAmazonDeliveryLocation(page, url, 20000);
+		expect(out.updated).toBe(false);
+		expect(out.steps[0]).toContain('indirizzo_rifiutato');
 	});
 });
 

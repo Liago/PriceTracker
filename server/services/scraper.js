@@ -525,7 +525,7 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, create
 		let delivery = null;
 		if (isAmazon && data.price == null && deadline - Date.now() - RESPONSE_RESERVE_MS > 6000) {
 			delivery = await setAmazonDeliveryLocation(page, landedUrl, deadline - Date.now() - RESPONSE_RESERVE_MS);
-			console.log(`[Scraper] Amazon: posizione "${delivery.before}" -> "${delivery.after}" (${delivery.updated ? 'aggiornata' : delivery.error || 'invariata'})`);
+			console.log(`[Scraper] Amazon: posizione "${delivery.before}" -> "${delivery.after}" (${delivery.updated ? `aggiornata via ${delivery.method}` : delivery.error || 'invariata'}) [${delivery.steps.join(' | ')}]`);
 			if (delivery.updated) {
 				({ budget: readinessBudget, timedOut: priceReadinessTimedOut } = await waitForProduct());
 				data = read(await page.content());
@@ -648,18 +648,66 @@ function shouldSkipTier0({ recipe, allowBrowser, remainingMs }) {
 const AMAZON_ZIP = Object.freeze({ 'amazon.it': '20121', 'amazon.de': '10115', 'amazon.fr': '75001', 'amazon.es': '28001', 'amazon.co.uk': 'SW1A 1AA', 'amazon.com': '10001' });
 
 /**
- * Imposta la posizione di consegna dal selettore di Amazon («Invia a»),
- * con gli stessi passi di un utente, e ricarica la scheda. Non inventa cookie
- * di sessione: e' Amazon a salvare la scelta nella sessione che ha creato.
- * Ogni passo ha un timeout; un fallimento lascia la pagina com'era.
+ * Gira dentro la pagina (autonoma per Puppeteer): cambia la posizione di
+ * consegna con le stesse chiamate del selettore «Invia a». Il token
+ * anti-CSRF del riquadro e' in `data-a-modal`; il riquadro contiene quello per
+ * `address-change`. Le richieste partono dalla pagina, con la sessione che
+ * Amazon stessa ha aperto: nessun cookie inventato.
+ */
+async function amazonAddressChange(zip) {
+	const holder = document.querySelector('#nav-global-location-data-modal-action');
+	if (!holder) return { ok: false, step: 'modal_assente' };
+	let modal;
+	try { modal = JSON.parse(holder.getAttribute('data-a-modal') || ''); } catch { return { ok: false, step: 'modal_illeggibile' }; }
+	if (!modal?.url) return { ok: false, step: 'modal_senza_url' };
+	const headers = { ...(modal.ajaxHeaders || {}), 'x-requested-with': 'XMLHttpRequest' };
+	const rendered = await fetch(modal.url, { headers, credentials: 'include' });
+	if (!rendered.ok) return { ok: false, step: `modal_http_${rendered.status}` };
+	const html = await rendered.text();
+	const token = /CSRF_TOKEN\s*[:=]\s*["']([^"']+)["']/.exec(html)?.[1];
+	if (!token) return { ok: false, step: 'token_assente' };
+	const params = new URL(modal.url, location.origin).searchParams;
+	const response = await fetch('/portal-migration/hz/glow/address-change?actionSource=glow', {
+		method: 'POST', credentials: 'include',
+		headers: { 'content-type': 'application/json', 'anti-csrftoken-a2z': token, 'x-requested-with': 'XMLHttpRequest' },
+		body: JSON.stringify({ locationType: 'LOCATION_INPUT', zipCode: zip, deviceType: 'web',
+			storeContext: params.get('storeContext') || 'generic', pageType: params.get('pageType') || 'Detail', actionSource: 'glow' }),
+	});
+	if (!response.ok) return { ok: false, step: `address_http_${response.status}` };
+	const body = await response.json().catch(() => null);
+	const ok = !body || (body.isAddressUpdated !== 0 && body.isValidAddress !== 0);
+	return { ok, step: ok ? 'address_change' : 'indirizzo_rifiutato', body: body ? JSON.stringify(body).slice(0, 200) : null };
+}
+
+/**
+ * Imposta la posizione di consegna e ricarica la scheda. Prima con le
+ * chiamate del selettore (indipendenti dal layout: i fogli di stile sono
+ * bloccati e il pulsante «Applica» puo' non reagire al clic), poi, come
+ * ripiego, con il clic. Ogni passo ha un timeout; un fallimento lascia la
+ * pagina com'era e dice dove si e' fermato.
  */
 async function setAmazonDeliveryLocation(page, url, budgetMs) {
 	const readLocation = () => page.evaluate(() => (document.querySelector('#glow-ingress-line2, #nav-global-location-slot')?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80)).catch(() => null);
 	const host = (() => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } })();
 	const zip = process.env.AMAZON_DELIVERY_ZIP || AMAZON_ZIP[host];
-	const result = { before: await readLocation(), after: null, zip: zip || null, updated: false, error: null };
-	if (!zip || typeof page.waitForSelector !== 'function') return { ...result, error: 'non_supportato' };
-	const step = Math.max(1500, Math.min(5000, Math.floor(budgetMs / 3)));
+	const result = { before: await readLocation(), after: null, zip: zip || null, updated: false, method: null, error: null, steps: [] };
+	if (!zip) return { ...result, error: 'non_supportato' };
+	const step = Math.max(1500, Math.min(5000, Math.floor(budgetMs / 4)));
+	const withTimeout = (promise, ms) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error('timeout'), { name: 'TimeoutError' })), ms))]);
+	const reload = async method => {
+		await page.reload({ waitUntil: 'domcontentloaded', timeout: step * 2 });
+		return { ...result, after: await readLocation(), updated: true, method, error: null };
+	};
+
+	try {
+		const api = await withTimeout(page.evaluate(amazonAddressChange, zip), step * 2);
+		result.steps.push(api.step + (api.body ? ` ${api.body}` : ''));
+		if (api.ok) return await reload('api');
+	} catch (error) {
+		result.steps.push(`api: ${error.name === 'TimeoutError' ? 'timeout' : error.message.slice(0, 80)}`);
+	}
+
+	if (typeof page.waitForSelector !== 'function') return { ...result, error: result.steps.at(-1) || 'non_supportato' };
 	try {
 		const opened = await page.evaluate(() => {
 			const link = document.querySelector('#nav-global-location-popover-link, #glow-ingress-block');
@@ -676,11 +724,8 @@ async function setAmazonDeliveryLocation(page, url, budgetMs) {
 			if (button) button.click();
 		});
 		const response = await saved;
-		if (!response || !response.ok()) return { ...result, error: response ? `http_${response.status()}` : 'nessuna_conferma' };
-		await page.reload({ waitUntil: 'domcontentloaded', timeout: step * 2 });
-		result.after = await readLocation();
-		result.updated = true;
-		return result;
+		if (!response || !response.ok()) return { ...result, after: await readLocation(), error: response ? `http_${response.status()}` : 'nessuna_conferma' };
+		return await reload('clic');
 	} catch (error) {
 		return { ...result, after: await readLocation(), error: error.name === 'TimeoutError' ? 'timeout' : error.message.slice(0, 80) };
 	}
@@ -1005,6 +1050,7 @@ module.exports = {
 	amazonFetchUrl,
 	resolveAmazonShortLink,
 	setAmazonDeliveryLocation,
+	amazonAddressChange,
 	retryDelay,
 	inspectResult,
 	BUDGET_EXCEEDED,
