@@ -181,3 +181,19 @@ verifiable price: those failures remain explicit results rather than HTML 504s.
 Le background function richiedono un piano Netlify che le includa: verificare
 nei log che `worker` risponda `202` e che `scrape-worker-background` compaia
 fra le function invocate. Nessuna nuova migrazione.
+
+## Amazon: link brevi e posizione di consegna
+
+- I link brevi (`amzn.eu`, `amzn.to`, `a.co`) si risolvono prima della lettura,
+  seguendo solo redirect verso Amazon: la scheda si scarica con `/dp/ASIN?psc=1`
+  e il browser riconosce Amazon (prima l'attesa del prezzo scendeva a 2,5 s).
+- Amazon sceglie la posizione di consegna dall'IP. Le function Netlify girano
+  fuori dall'Italia e la scheda risulta «non spedibile», senza prezzo nel buy
+  box: era la causa delle letture vuote (e, prima dell'estrattore dedicato, dei
+  prezzi presi da prodotti correlati). Quando il prezzo non compare, il browser
+  imposta il CAP dal selettore «Invia a» (20121 per amazon.it; override con
+  `AMAZON_DELIVERY_ZIP`) e ricarica la scheda. Esito in
+  `diagnostics.deliveryLocation` (`before`, `after`, `updated`, `error`).
+- `diagnostics.priceExtraction.page` riporta posizione mostrata da Amazon,
+  disponibilita', testo del buy box, contenitori presenti e prezzi con il loro
+  contenitore: dice perche' il prezzo manca senza dover catturare la pagina.

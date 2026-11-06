@@ -443,14 +443,32 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, create
 			console.warn(`[Scraper] Navigation timeout for ${url} dopo ${navigationTimeoutMs}ms, provo con quel che c'e'`);
 		}
 
-		const isAmazon = require('../scrape/extract/retailers').retailerOf(url) === 'amazon';
-		const readinessBudget = Math.max(0, Math.min(isAmazon ? 8000 : 2500, deadline - Date.now() - RESPONSE_RESERVE_MS));
-		let priceReadinessTimedOut = false;
-		if (readinessBudget > 200 && typeof page.waitForFunction === 'function') {
-			await page.waitForFunction(productReady, { timeout: readinessBudget, polling: 150 }).catch(error => {
-				if (error.name !== 'TimeoutError') throw error;
-				priceReadinessTimedOut = true;
-			});
+		// L'URL della pagina, non quello richiesto: un link breve (amzn.eu)
+		// arriva ad Amazon solo dopo il redirect.
+		const landedUrl = typeof page.url === 'function' ? page.url() : url;
+		const isAmazon = require('../scrape/extract/retailers').retailerOf(landedUrl) === 'amazon';
+		const waitForProduct = async () => {
+			const budget = Math.max(0, Math.min(isAmazon ? 8000 : 2500, deadline - Date.now() - RESPONSE_RESERVE_MS));
+			let timedOut = false;
+			if (budget > 200 && typeof page.waitForFunction === 'function') {
+				await page.waitForFunction(productReady, { timeout: budget, polling: 150 }).catch(error => {
+					if (error.name !== 'TimeoutError') throw error;
+					timedOut = true;
+				});
+			}
+			return { budget, timedOut };
+		};
+		let { budget: readinessBudget, timedOut: priceReadinessTimedOut } = await waitForProduct();
+
+		// Amazon decide la posizione di consegna dall'indirizzo IP: le function
+		// girano fuori dall'Italia e la scheda diventa «non spedibile», senza
+		// prezzo nel buy box. Si imposta il CAP come farebbe un utente, solo
+		// quando il prezzo non e' comparso.
+		let delivery = null;
+		if (isAmazon && priceReadinessTimedOut && deadline - Date.now() - RESPONSE_RESERVE_MS > 6000) {
+			delivery = await setAmazonDeliveryLocation(page, landedUrl, deadline - Date.now() - RESPONSE_RESERVE_MS);
+			if (delivery.updated) ({ budget: readinessBudget, timedOut: priceReadinessTimedOut } = await waitForProduct());
+			console.log(`[Scraper] Amazon: posizione "${delivery.before}" -> "${delivery.after}" (${delivery.updated ? 'aggiornata' : delivery.error || 'invariata'})`);
 		}
 
 		// Enhanced CAPTCHA detection
@@ -539,6 +557,7 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, create
 			browserStartMs,
 			priceReadinessTimedOut,
 			readinessBudgetMs: readinessBudget,
+			deliveryLocation: delivery,
 		};
 
 		await browser.close();
@@ -615,6 +634,79 @@ function shouldSkipTier0({ recipe, allowBrowser, remainingMs }) {
 	return allowBrowser && remainingMs >= browserBudgetNeeded();
 }
 
+/** CAP di consegna per dominio Amazon, sovrascrivibile con AMAZON_DELIVERY_ZIP. */
+const AMAZON_ZIP = Object.freeze({ 'amazon.it': '20121', 'amazon.de': '10115', 'amazon.fr': '75001', 'amazon.es': '28001', 'amazon.co.uk': 'SW1A 1AA', 'amazon.com': '10001' });
+
+/**
+ * Imposta la posizione di consegna dal selettore di Amazon («Invia a»),
+ * con gli stessi passi di un utente, e ricarica la scheda. Non inventa cookie
+ * di sessione: e' Amazon a salvare la scelta nella sessione che ha creato.
+ * Ogni passo ha un timeout; un fallimento lascia la pagina com'era.
+ */
+async function setAmazonDeliveryLocation(page, url, budgetMs) {
+	const readLocation = () => page.evaluate(() => (document.querySelector('#glow-ingress-line2, #nav-global-location-slot')?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80)).catch(() => null);
+	const host = (() => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } })();
+	const zip = process.env.AMAZON_DELIVERY_ZIP || AMAZON_ZIP[host];
+	const result = { before: await readLocation(), after: null, zip: zip || null, updated: false, error: null };
+	if (!zip || typeof page.waitForSelector !== 'function') return { ...result, error: 'non_supportato' };
+	const step = Math.max(1500, Math.min(5000, Math.floor(budgetMs / 3)));
+	try {
+		const opened = await page.evaluate(() => {
+			const link = document.querySelector('#nav-global-location-popover-link, #glow-ingress-block');
+			if (link) link.click();
+			return Boolean(link);
+		});
+		if (!opened) return { ...result, error: 'selettore_assente' };
+		await page.waitForSelector('#GLUXZipUpdateInput', { timeout: step });
+		await page.evaluate(() => { const input = document.querySelector('#GLUXZipUpdateInput'); if (input) input.value = ''; });
+		await page.type('#GLUXZipUpdateInput', zip);
+		const saved = page.waitForResponse(response => /address-change/.test(response.url()), { timeout: step }).catch(() => null);
+		await page.evaluate(() => {
+			const button = document.querySelector('#GLUXZipUpdate input, #GLUXZipUpdate .a-button-input, #GLUXZipUpdate');
+			if (button) button.click();
+		});
+		const response = await saved;
+		if (!response || !response.ok()) return { ...result, error: response ? `http_${response.status()}` : 'nessuna_conferma' };
+		await page.reload({ waitUntil: 'domcontentloaded', timeout: step * 2 });
+		result.after = await readLocation();
+		result.updated = true;
+		return result;
+	} catch (error) {
+		return { ...result, after: await readLocation(), error: error.name === 'TimeoutError' ? 'timeout' : error.message.slice(0, 80) };
+	}
+}
+
+/** Host dei link brevi di Amazon, che si risolvono prima di leggere la pagina. */
+const AMAZON_SHORT_HOSTS = new Set(['amzn.eu', 'amzn.to', 'a.co', 'amzn.com', 'amzn.asia']);
+
+/**
+ * Risolve un link breve Amazon seguendo i redirect senza scaricare la
+ * pagina. Si seguono solo destinazioni Amazon: l'URL di partenza viene
+ * dall'utente e un redirect verso altro non va inseguito.
+ */
+async function resolveAmazonShortLink(url, { request = fetch, timeoutMs = 4000 } = {}) {
+	let current;
+	try { current = new URL(url); } catch { return url; }
+	if (!AMAZON_SHORT_HOSTS.has(current.hostname.replace(/^www\./, ''))) return url;
+	const { retailerOf } = require('../scrape/extract/retailers');
+	for (let hop = 0; hop < 5; hop++) {
+		let response;
+		try {
+			response = await request(current.toString(), { method: 'GET', redirect: 'manual', signal: AbortSignal.timeout(timeoutMs),
+				headers: { 'User-Agent': userAgentManager.getUserAgentForUrl(current.toString()), 'Accept-Language': 'it-IT,it;q=0.9' } });
+		} catch {
+			return url;
+		}
+		const location = response.headers?.get?.('location');
+		if (response.status < 300 || response.status >= 400 || !location) return url;
+		const next = new URL(location, current);
+		if (retailerOf(next.toString()) === 'amazon') return next.toString();
+		if (!AMAZON_SHORT_HOSTS.has(next.hostname.replace(/^www\./, ''))) return url;
+		current = next;
+	}
+	return url;
+}
+
 /**
  * L'URL da scaricare per una scheda Amazon.
  *
@@ -660,8 +752,10 @@ async function scrapeProduct(url, options = {}) {
 		fetchHtmlImpl = fetchHtml,
 		createBrowserImpl = createBrowser,
 		maxRetries = MAX_RETRIES - 1,
+		resolveShortLinkImpl = resolveAmazonShortLink,
 	} = normalized;
 
+	url = await resolveShortLinkImpl(url);
 	url = amazonFetchUrl(require('../scrape/normalize/offer').canonicalizeUrl(url) || url);
 	const startedAt = Date.now();
 	const deadline = startedAt + budgetMs;
@@ -857,6 +951,7 @@ function withDebug(data, { url, tier, attempt, startedAt, tier0Skipped, evidence
 		navigationTimedOut: proof.navigationTimedOut ?? null,
 		priceReadinessTimedOut: proof.priceReadinessTimedOut ?? null,
 		readinessBudgetMs: proof.readinessBudgetMs ?? null,
+		deliveryLocation: proof.deliveryLocation ?? null,
 		// Chi ha prodotto candidati e chi no: e' la prima cosa da guardare
 		// quando la confidenza e' bassa e non si sa perche'.
 		extractors: (data.extractorsRan || [])
@@ -898,6 +993,8 @@ module.exports = {
 	browserBudgetNeeded,
 	shouldSkipTier0,
 	amazonFetchUrl,
+	resolveAmazonShortLink,
+	setAmazonDeliveryLocation,
 	retryDelay,
 	inspectResult,
 	BUDGET_EXCEEDED,

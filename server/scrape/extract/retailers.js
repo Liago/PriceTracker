@@ -33,6 +33,34 @@ function amazonPriceText($, el) {
 	return `${whole}${fraction ? `.${fraction}` : ''} ${symbol}`.trim();
 }
 
+/** Testo breve e senza script di un nodo, per la diagnostica. */
+function snippet($, selector, max = 160) {
+	const node = $(selector).first().clone();
+	if (!node.length) return null;
+	node.find('script, style, noscript').remove();
+	return node.text().replace(/\s+/g, ' ').trim().slice(0, max) || null;
+}
+
+/** Indizi delimitati sullo stato della scheda: niente pagina intera ne' dati di sessione. */
+function amazonPageEvidence($) {
+	const markers = ['#buybox', '#apex_desktop', '#desktop_qualifiedBuyBox', '#buybox-see-all-buying-choices',
+		'#exports_desktop_undeliverable_buybox', '#outOfStock', '#availability', '#add-to-cart-button',
+		'#nav-global-location-popover-link', '#all-offers-display', '#tp_price_block_total_price_ww'];
+	const anywhere = $('.a-price').toArray().slice(0, 12).map(el => {
+		const owner = $(el).parents('[id]').first();
+		return { owner: (owner.attr('id') || '').slice(0, 80), text: amazonPriceText($, el).replace(/\s+/g, ' ').trim().slice(0, 40),
+			class: ($(el).attr('class') || '').slice(0, 120) };
+	});
+	return {
+		deliveryLocation: snippet($, '#glow-ingress-line2, #nav-global-location-slot', 80),
+		availability: snippet($, '#availability, #availabilityInsideBuyBox_feature_div'),
+		buyBox: snippet($, '#buybox, #desktop_qualifiedBuyBox, #apex_desktop', 300),
+		undeliverable: snippet($, '#exports_desktop_undeliverable_buybox, #exportsUndeliverable-cart-button', 200),
+		markers: Object.fromEntries(markers.map(m => [m, $(m).length])),
+		pricesAnywhere: anywhere,
+	};
+}
+
 /** Valuta dal simbolo, oppure dal dominio quando il simbolo manca. */
 function currencyOf(text, url) {
 	if (/€|EUR/.test(text)) return 'EUR';
@@ -125,6 +153,10 @@ function extract(doc) {
 					: attempts.some(a => a.matched > 0) ? 'all_candidates_rejected' : 'no_matching_selector',
 				roots: Object.fromEntries(roots.map(root => [root, $(root).length])),
 				attempts, priceNodes,
+				// Perche' il prezzo manca, nei termini della pagina: dove Amazon
+				// crede che si trovi chi la guarda, cosa dice la disponibilita' e
+				// quali contenitori di acquisto ha servito al loro posto.
+				page: amazonPageEvidence($),
 			};
 			add('price_status', requiresCart ? 'price_requires_cart' : 'main_price_unavailable', 'buy-box', { priceDiagnostics });
 		}

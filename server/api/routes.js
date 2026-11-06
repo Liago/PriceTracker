@@ -66,6 +66,7 @@ function describeAttempt(scraped) {
 		navigationTimedOut: debug.navigationTimedOut ?? null,
 		priceReadinessTimedOut: debug.priceReadinessTimedOut ?? null,
 		readinessBudgetMs: debug.readinessBudgetMs ?? null,
+		deliveryLocation: debug.deliveryLocation ?? null,
 		extractors: debug.extractors || null,
 		priceExtraction: debug.priceExtraction ?? scraped?.priceDiagnostics ?? null,
 		totalMs: debug.totalMs ?? null,
