@@ -24,6 +24,7 @@ function evaluatePrice({ scraped, product = {}, history = [], knownOffer = null,
 	if (scraped?.fields?.price?.meta?.isRange) problems.push('offerta_ambigua');
 	if (scraped?.priceStatus) problems.push(scraped.priceStatus);
 	if (scraped?.debug?.degraded) problems.push('lettura_incompleta');
+	if (scraped?.debug?.degraded === 'prezzo_non_caricato') problems.push('prezzo_non_caricato');
 	if (knownOffer) {
 		for (const key of ['seller', 'condition']) {
 			if (knownOffer[key] && (!descriptor[key] || knownOffer[key].toLowerCase().trim() !== descriptor[key].toLowerCase().trim())) problems.push(REJECT.IDENTITY_CHANGED);

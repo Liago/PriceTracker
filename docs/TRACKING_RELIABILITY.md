@@ -103,6 +103,16 @@ When Amazon has no accepted main price, `diagnostics.priceExtraction` in the
 conflicting prices. It records selector counts, rejection filters and a bounded
 inventory of price nodes in the primary price/buy-box containers. This evidence
 also survives in scraper diagnostics for refreshes. It never substitutes another
-seller's price or lowers the acceptance threshold. Zeiss B09K48BMV8 still needs a
-capture from the failing production request: the development session currently
-receives Amazon's unsupported-session page instead of that product's markup.
+seller's price or lowers the acceptance threshold.
+
+For Amazon, browser readiness waits for a populated primary-price node or an
+explicit unavailable/cart-only state, rather than accepting in-stock availability
+as evidence that price widgets have loaded. The wait is bounded to 8 seconds and
+the remaining request budget. No synthetic retailer session cookies are injected.
+Legacy primary buy-box prices and the `corePrice_desktop_feature_div` layout are
+also supported. A timed-out wait with no accepted primary price is reported as
+`prezzo_non_caricato`, with `priceReadinessTimedOut` and `readinessBudgetMs` in
+diagnostics; it is an incomplete reading, not an invalid product configuration.
+The Zeiss B09K48BMV8 production failure had empty known price roots and no matching
+price nodes. Tests reproduce delayed price loading, but live recovery for that
+specific product must still be verified after deployment.

@@ -37,6 +37,7 @@ const { resolveLocalExecutablePath } = require('../utils/browserPath');
 const { interpret } = require('../scrape');
 const { fetchHtml } = require('../scrape/fetchHtml');
 const { detectInHtml } = require('../scrape/antiBot');
+const { productReady } = require('../scrape/browserReadiness');
 
 // Configuration
 const MAX_RETRIES = parseInt(process.env.SCRAPER_MAX_RETRIES || '3', 10);
@@ -354,7 +355,7 @@ async function runTier0(url, { recipe, lastKnownPrice, timeoutMs, fetchHtmlImpl 
  * @param {object} context
  * @returns {Promise<object>} risultato interpretato
  */
-async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline }) {
+async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, createBrowserImpl = createBrowser }) {
 	let browser = null;
 	const proxy = proxyManager.hasProxies() ? proxyManager.getRandomProxy() : null;
 
@@ -376,7 +377,7 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline }) {
 		// il proprio budget di quanto era costato l'avvio - in produzione 10808ms
 		// su 9000 concessi - e la navigazione partiva gia' in ritardo.
 		const launchedAt = Date.now();
-		browser = await createBrowser(proxy);
+		browser = await createBrowserImpl(proxy);
 		const browserStartMs = Date.now() - launchedAt;
 		observedBrowserStartMs = browserStartMs;
 
@@ -424,13 +425,8 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline }) {
 			}
 		});
 
-		// Domain specific cookies
-		const domain = new URL(url).hostname;
-		await page.setCookie({
-			name: 'session-id',
-			value: `${Date.now()}-${Math.random().toString(36).substring(7)}`,
-			domain: domain
-		});
+		// Let the retailer establish its own session; invented session cookies
+		// can leave the product shell and purchase widgets in different sessions.
 
 		// Navigate with timeout handling. Il timeout e' quello che resta del
 		// budget, non un valore fisso: un'attesa di trenta secondi dentro una
@@ -447,13 +443,14 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline }) {
 			console.warn(`[Scraper] Navigation timeout for ${url} dopo ${navigationTimeoutMs}ms, provo con quel che c'e'`);
 		}
 
-		const readinessBudget = Math.min(2500, deadline - Date.now() - RESPONSE_RESERVE_MS);
+		const isAmazon = require('../scrape/extract/retailers').retailerOf(url) === 'amazon';
+		const readinessBudget = Math.max(0, Math.min(isAmazon ? 8000 : 2500, deadline - Date.now() - RESPONSE_RESERVE_MS));
+		let priceReadinessTimedOut = false;
 		if (readinessBudget > 200 && typeof page.waitForFunction === 'function') {
-			await page.waitForFunction(() => {
-				if (location.hostname.endsWith('swappie.com')) return Boolean(window.__INITIAL__DATA__?.productPageData?.selectedProduct);
-				if (/amazon\./.test(location.hostname)) return Boolean(document.querySelector('#corePriceDisplay_desktop_feature_div .a-offscreen, #corePrice_feature_div .a-offscreen, #availability'));
-				return Boolean(document.querySelector('script[type="application/ld+json"], [itemprop="price"], [class*="price"]'));
-			}, { timeout: readinessBudget, polling: 150 }).catch(() => {});
+			await page.waitForFunction(productReady, { timeout: readinessBudget, polling: 150 }).catch(error => {
+				if (error.name !== 'TimeoutError') throw error;
+				priceReadinessTimedOut = true;
+			});
 		}
 
 		// Enhanced CAPTCHA detection
@@ -540,6 +537,8 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline }) {
 			pageTitle: inspection.title,
 			navigationTimedOut,
 			browserStartMs,
+			priceReadinessTimedOut,
+			readinessBudgetMs: readinessBudget,
 		};
 
 		await browser.close();
@@ -639,6 +638,7 @@ async function scrapeProduct(url, options = {}) {
 		allowBrowser = true,
 		allowHttp = TIER0_ENABLED,
 		fetchHtmlImpl = fetchHtml,
+		createBrowserImpl = createBrowser,
 		maxRetries = MAX_RETRIES - 1,
 	} = normalized;
 
@@ -647,7 +647,7 @@ async function scrapeProduct(url, options = {}) {
 	const deadline = startedAt + budgetMs;
 	const remaining = () => deadline - Date.now();
 
-	const context = { recipe, lastKnownPrice };
+	const context = { recipe, lastKnownPrice, createBrowserImpl };
 
 	/** Il miglior risultato ottenuto finora, da restituire se il budget finisce. */
 	let best = null;
@@ -829,12 +829,14 @@ function withDebug(data, { url, tier, attempt, startedAt, tier0Skipped, evidence
 		priceExtraction: data.priceDiagnostics ?? null,
 		attempt,
 		tier0Skipped,
-		degraded,
+		degraded: degraded || (proof.priceReadinessTimedOut && data.priceStatus === 'main_price_unavailable' ? 'prezzo_non_caricato' : null),
 		totalMs: Date.now() - startedAt,
 		htmlBytes: proof.htmlBytes ?? null,
 		pageTitle: proof.pageTitle || null,
 		httpStatus: proof.httpStatus ?? null,
 		navigationTimedOut: proof.navigationTimedOut ?? null,
+		priceReadinessTimedOut: proof.priceReadinessTimedOut ?? null,
+		readinessBudgetMs: proof.readinessBudgetMs ?? null,
 		// Chi ha prodotto candidati e chi no: e' la prima cosa da guardare
 		// quando la confidenza e' bassa e non si sa perche'.
 		extractors: (data.extractorsRan || [])

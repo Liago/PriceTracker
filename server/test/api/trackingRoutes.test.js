@@ -10,6 +10,11 @@ function setup(scraped,{writeError=false}={}){
  return {handler:handlers['/products'],rpc,res,req:{headers:{authorization:'Bearer token'},body:{url:'https://shop.example/item'}}};
 }
 describe('initial product validation',()=>{
+ it('reports a purchase-widget timeout as an incomplete reading without persisting a product',async()=>{
+  const ctx=setup({price:null,confidence:0,debug:{degraded:'prezzo_non_caricato',priceReadinessTimedOut:true,readinessBudgetMs:8000}});
+  await ctx.handler(ctx.req,ctx.res);expect(ctx.res.statusCode).toBe(502);expect(ctx.rpc).not.toHaveBeenCalled();
+  expect(ctx.res.payload.diagnostics).toMatchObject({reason:'prezzo_non_caricato',priceReadinessTimedOut:true,readinessBudgetMs:8000});
+ });
  it('returns scoped Amazon extraction evidence when a new product has no verified main price',async()=>{
   const scraped=engine.interpret('<h1 id="productTitle">Zeiss wipes</h1><div id="buybox"><span class="a-price">19,99 €</span></div>',{url:'https://www.amazon.it/dp/B09K48BMV8'});
   const ctx=setup(scraped);await ctx.handler(ctx.req,ctx.res);

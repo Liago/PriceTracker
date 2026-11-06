@@ -64,6 +64,8 @@ function describeAttempt(scraped) {
 		pageTitle: debug.pageTitle || null,
 		httpStatus: debug.httpStatus ?? null,
 		navigationTimedOut: debug.navigationTimedOut ?? null,
+		priceReadinessTimedOut: debug.priceReadinessTimedOut ?? null,
+		readinessBudgetMs: debug.readinessBudgetMs ?? null,
 		extractors: debug.extractors || null,
 		priceExtraction: debug.priceExtraction ?? scraped?.priceDiagnostics ?? null,
 		totalMs: debug.totalMs ?? null,
@@ -78,6 +80,10 @@ function describeAttempt(scraped) {
  * tre stia guardando.
  */
 const FAILURES = Object.freeze({
+	prezzo_non_caricato: {
+		status: 502,
+		message: 'La scheda è stata caricata, ma il prezzo non è diventato disponibile nel tempo di attesa',
+	},
 	pagina_di_sfida: {
 		status: 503,
 		message: 'Il sito ha risposto con una verifica di sicurezza invece della pagina prodotto',

@@ -23,7 +23,15 @@ function extract(doc) {
 		add('image', $('#landingImage').attr('src') || doc.meta('og:image'), '#landingImage');
 		const asin = /\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?]|$)/i.exec(doc.url)?.[1];
 		if (asin) add('sku', asin.toUpperCase(), 'url:asin');
-		const selectors = ['#corePriceDisplay_desktop_feature_div .priceToPay .a-offscreen', '#corePriceDisplay_desktop_feature_div .a-price .a-offscreen', '#corePrice_feature_div .a-price .a-offscreen', '#apex_desktop .priceToPay .a-offscreen', '#priceblock_ourprice', '#priceblock_dealprice'];
+		const selectors = [
+			'#corePriceDisplay_desktop_feature_div .priceToPay .a-offscreen',
+			'#corePriceDisplay_desktop_feature_div .a-price .a-offscreen',
+			'#corePrice_feature_div .a-price .a-offscreen',
+			'#corePrice_desktop_feature_div .priceToPay .a-offscreen',
+			'#corePrice_desktop_feature_div .a-price .a-offscreen',
+			'#apex_desktop .priceToPay .a-offscreen',
+			'#priceblock_ourprice', '#priceblock_dealprice', '#price_inside_buybox', '#newBuyBoxPrice',
+		];
 		let found = false;
 		const attempts = [];
 		for (const selector of selectors) {
@@ -57,7 +65,7 @@ function extract(doc) {
 			const text = buyBox.text().replace(/\s+/g, ' ');
 			const requiresCart = /(?:per (?:visualizzare|vedere).{0,100}aggiungi.{0,60}carrello|add.{0,60}(?:cart|basket).{0,60}(?:see|view).{0,30}price|(?:see|view).{0,30}price.{0,60}(?:cart|basket))/i.test(text);
 			// Bounded price-only evidence: no full page, scripts, reviews or session attributes.
-			const roots = ['#corePriceDisplay_desktop_feature_div', '#corePrice_feature_div', '#apex_desktop', '#buybox', '#desktop_qualifiedBuyBox'];
+			const roots = ['#corePriceDisplay_desktop_feature_div', '#corePrice_feature_div', '#corePrice_desktop_feature_div', '#apex_desktop', '#buybox', '#desktop_qualifiedBuyBox'];
 			const priceNodes = $(roots.map(root => `${root} .a-price`).join(', ')).slice(0, 12).toArray().map(el => {
 				const node = $(el).clone();
 				node.find('script, style, noscript').remove();

@@ -83,6 +83,7 @@ export function getProductHealth(productId: string) {
 }
 
 export function trackingMessage(reasons: string[] = []): string | undefined {
+	if (reasons.includes('prezzo_non_caricato')) return 'La scheda è stata caricata, ma il prezzo non è diventato disponibile nel tempo di attesa. Riprova tra poco.'
   if (reasons.includes('price_requires_cart')) return 'Amazon mostra il prezzo di questa offerta solo nel carrello. Il valore mostrato è l’ultimo verificato; i prezzi degli altri venditori non vengono usati al suo posto.'
   if (reasons.includes('main_price_unavailable')) return 'Amazon non espone un prezzo per l’offerta principale. Il valore mostrato è l’ultimo verificato.'
   if (reasons.includes('identita_cambiata')) return 'La pagina mostra una configurazione diversa da quella monitorata. Verifica il link della variante: memoria, colore, condizione e batteria.'
