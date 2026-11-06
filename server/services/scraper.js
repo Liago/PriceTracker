@@ -464,13 +464,6 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, create
 		// girano fuori dall'Italia e la scheda diventa «non spedibile», senza
 		// prezzo nel buy box. Si imposta il CAP come farebbe un utente, solo
 		// quando il prezzo non e' comparso.
-		let delivery = null;
-		if (isAmazon && priceReadinessTimedOut && deadline - Date.now() - RESPONSE_RESERVE_MS > 6000) {
-			delivery = await setAmazonDeliveryLocation(page, landedUrl, deadline - Date.now() - RESPONSE_RESERVE_MS);
-			if (delivery.updated) ({ budget: readinessBudget, timedOut: priceReadinessTimedOut } = await waitForProduct());
-			console.log(`[Scraper] Amazon: posizione "${delivery.before}" -> "${delivery.after}" (${delivery.updated ? 'aggiornata' : delivery.error || 'invariata'})`);
-		}
-
 		// Enhanced CAPTCHA detection
 		const captchaResult = await captchaDetector.detect(page);
 		if (captchaResult.detected) {
@@ -514,13 +507,30 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, create
 			});
 		}
 
-		const data = interpret(html, {
+		const read = content => interpret(content, {
 			url: typeof page.url === 'function' ? page.url() : url,
 			recipe,
 			lastKnownPrice,
 			antiBotDetected: captchaResult.detected,
 			fastPathThreshold: FAST_PATH_THRESHOLD,
 		});
+		let data = read(html);
+
+		// Amazon decide la posizione di consegna dall'indirizzo IP: le function
+		// girano fuori dall'Italia e la scheda risulta «non spedibile» - senza
+		// prezzo, spesso con «non disponibile», che per la readiness e' uno
+		// stato finale. Il criterio e' quindi l'esito della lettura, non la
+		// scadenza dell'attesa: ogni volta che manca il prezzo si imposta il CAP
+		// come farebbe un utente e si rilegge la scheda.
+		let delivery = null;
+		if (isAmazon && data.price == null && deadline - Date.now() - RESPONSE_RESERVE_MS > 6000) {
+			delivery = await setAmazonDeliveryLocation(page, landedUrl, deadline - Date.now() - RESPONSE_RESERVE_MS);
+			console.log(`[Scraper] Amazon: posizione "${delivery.before}" -> "${delivery.after}" (${delivery.updated ? 'aggiornata' : delivery.error || 'invariata'})`);
+			if (delivery.updated) {
+				({ budget: readinessBudget, timedOut: priceReadinessTimedOut } = await waitForProduct());
+				data = read(await page.content());
+			}
+		}
 
 		if (!data.title) data.title = await page.title();
 

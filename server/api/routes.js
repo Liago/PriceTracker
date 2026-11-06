@@ -467,6 +467,12 @@ async function createProductRequest({ client, user, body, scrapeImpl = scrapePro
 		const reading = evaluatePrice({ scraped, product: { url: policy.url } });
 		if (!reading.validation.accepted) {
 			if (scraped.debug?.degraded) return respondIncomplete(res, { scraped });
+			// Un rifiuto senza traccia nei log costringe a interrogare il database
+			// per sapere perche': la diagnostica, delimitata, va anche qui.
+			const diagnostics = describeAttempt(scraped);
+			console.warn(`[API] Prezzo non verificabile (${reading.validation.reasons.join(',')}) per ${policy.url}: `
+				+ JSON.stringify({ tier: diagnostics.tier, pageTitle: diagnostics.pageTitle, deliveryLocation: diagnostics.deliveryLocation,
+					price: diagnostics.priceExtraction?.status ?? null, page: diagnostics.priceExtraction?.page ?? null }).slice(0, 3000));
 			return res.status(422).json({ error: 'Il prezzo della configurazione selezionata non è verificabile', code: 'LOW_CONFIDENCE',
 				confidence: reading.confidence, reasons: reading.validation.reasons, diagnostics: describeAttempt(scraped) });
 		}

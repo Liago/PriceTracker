@@ -71,4 +71,20 @@ describe('posizione di consegna Amazon', () => {
 		expect(out.priceDiagnostics.page.deliveryLocation).toBe('Stati Uniti');
 		expect(out.priceDiagnostics.page.buyBox).toContain('non può essere spedito');
 	});
+	it('imposta il CAP anche quando la scheda dice «non disponibile» e l\'attesa non scade', async () => {
+		const page = fakePage();
+		const doc = page.dom.window.document;
+		doc.querySelector('#buybox').insertAdjacentHTML('beforebegin', '<div id="availability">Non disponibile</div>');
+		Object.assign(page, {
+			setViewport: async () => {}, setUserAgent: async () => {}, setExtraHTTPHeaders: async () => {},
+			setRequestInterception: async () => {}, on: () => {}, goto: async () => {}, url: () => url,
+			title: async () => doc.title, waitForFunction: async () => {},
+			evaluate: async (fn, arg) => page.dom.window.eval(`(${fn.toString()})`)(arg),
+		});
+		const out = await scraper.scrapeProduct(url, { allowHttp: false, budgetMs: 30000, maxRetries: 0,
+			createBrowserImpl: async () => ({ newPage: async () => page, close: async () => {} }) });
+		expect(out.price).toBe(19.99);
+		expect(out.debug.deliveryLocation).toMatchObject({ before: 'Stati Uniti', updated: true });
+	});
 });
+
