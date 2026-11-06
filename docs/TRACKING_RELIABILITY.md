@@ -97,3 +97,12 @@ Seeded recipes try HTTP before using a browser: legacy `transport=browser` seed 
 does not prove that JavaScript is necessary. Manual browser preferences still apply.
 For structured products, `productID` is retained as an identity fallback when `sku`
 is absent; explicit storage/color become pinned offer attributes on a valid reading.
+
+When Amazon has no accepted main price, `diagnostics.priceExtraction` in the
+`POST /products` response distinguishes missing selectors, rejected nodes and
+conflicting prices. It records selector counts, rejection filters and a bounded
+inventory of price nodes in the primary price/buy-box containers. This evidence
+also survives in scraper diagnostics for refreshes. It never substitutes another
+seller's price or lowers the acceptance threshold. Zeiss B09K48BMV8 still needs a
+capture from the failing production request: the development session currently
+receives Amazon's unsupported-session page instead of that product's markup.

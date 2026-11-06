@@ -826,6 +826,7 @@ function withDebug(data, { url, tier, attempt, startedAt, tier0Skipped, evidence
 		usedFastPath: data.usedFastPath,
 		recipeId: data.recipeId,
 		foundPrice: data.price !== null,
+		priceExtraction: data.priceDiagnostics ?? null,
 		attempt,
 		tier0Skipped,
 		degraded,

@@ -49,6 +49,7 @@ function interpret(html, options = {}) {
 		gtin: pipeline.result.gtin ?? null,
 		store: offerStore(url),
 		priceStatus: pipeline.result.price_status ?? null,
+		priceDiagnostics: pipeline.fields.price_status?.meta?.priceDiagnostics ?? null,
 		details: {
 			seller: pipeline.result.seller ?? null,
 			condition: pipeline.result.condition ?? null,

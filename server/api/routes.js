@@ -65,6 +65,7 @@ function describeAttempt(scraped) {
 		httpStatus: debug.httpStatus ?? null,
 		navigationTimedOut: debug.navigationTimedOut ?? null,
 		extractors: debug.extractors || null,
+		priceExtraction: debug.priceExtraction ?? scraped?.priceDiagnostics ?? null,
 		totalMs: debug.totalMs ?? null,
 	};
 }

@@ -25,9 +25,25 @@ function extract(doc) {
 		if (asin) add('sku', asin.toUpperCase(), 'url:asin');
 		const selectors = ['#corePriceDisplay_desktop_feature_div .priceToPay .a-offscreen', '#corePriceDisplay_desktop_feature_div .a-price .a-offscreen', '#corePrice_feature_div .a-price .a-offscreen', '#apex_desktop .priceToPay .a-offscreen', '#priceblock_ourprice', '#priceblock_dealprice'];
 		let found = false;
+		const attempts = [];
 		for (const selector of selectors) {
-			const prices = $(selector).toArray().filter(el => !isStruck($, el) && !isHidden($, el) && !isOffTopic($, el) && !hasAccessoryAncestor($, el) && !$(el).closest('.a-text-price, [data-a-strike="true"], [id*="installment"], [id*="sns"]').length)
-				.map(el => ({ text: $(el).text(), price: parsePrice($(el).text()) })).filter(x => x.price !== null);
+			const attempt = { selector, matched: 0, accepted: 0, rejected: {}, values: [] };
+			const prices = [];
+			$(selector).each((_, el) => {
+				attempt.matched++;
+				const text = $(el).text(), price = parsePrice(text);
+				const reasons = [
+					isStruck($, el) && 'struck', isHidden($, el) && 'hidden',
+					isOffTopic($, el) && 'off_topic', hasAccessoryAncestor($, el) && 'accessory',
+					$(el).closest('.a-text-price, [data-a-strike="true"], [id*="installment"], [id*="sns"]').length > 0 && 'non_primary_offer',
+					price === null && 'unparseable',
+				].filter(Boolean);
+				for (const reason of reasons) attempt.rejected[reason] = (attempt.rejected[reason] || 0) + 1;
+				if (!reasons.length) prices.push({ text, price });
+			});
+			attempt.accepted = prices.length;
+			attempt.values = [...new Set(prices.map(x => x.price))].slice(0, 10);
+			attempts.push(attempt);
 			if (!prices.length) continue;
 			if (new Set(prices.map(x => x.price)).size !== 1) break;
 			add('price', prices[0].price, selector);
@@ -40,7 +56,28 @@ function extract(doc) {
 			buyBox.find('script, style, noscript').remove();
 			const text = buyBox.text().replace(/\s+/g, ' ');
 			const requiresCart = /(?:per (?:visualizzare|vedere).{0,100}aggiungi.{0,60}carrello|add.{0,60}(?:cart|basket).{0,60}(?:see|view).{0,30}price|(?:see|view).{0,30}price.{0,60}(?:cart|basket))/i.test(text);
-			add('price_status', requiresCart ? 'price_requires_cart' : 'main_price_unavailable', 'buy-box');
+			// Bounded price-only evidence: no full page, scripts, reviews or session attributes.
+			const roots = ['#corePriceDisplay_desktop_feature_div', '#corePrice_feature_div', '#apex_desktop', '#buybox', '#desktop_qualifiedBuyBox'];
+			const priceNodes = $(roots.map(root => `${root} .a-price`).join(', ')).slice(0, 12).toArray().map(el => {
+				const node = $(el).clone();
+				node.find('script, style, noscript').remove();
+				return {
+					text: node.text().replace(/\s+/g, ' ').trim().slice(0, 100),
+					ancestors: $(el).parents().toArray().slice(0, 8).map(parent => ({
+						tag: parent.tagName, id: ($(parent).attr('id') || '').slice(0, 100),
+						class: ($(parent).attr('class') || '').slice(0, 180),
+					})),
+					class: ($(el).attr('class') || '').slice(0, 180),
+					offscreenCount: $(el).find('.a-offscreen').length,
+				};
+			});
+			const priceDiagnostics = {
+				retailer, status: attempts.some(a => a.values.length > 1) ? 'ambiguous_price'
+					: attempts.some(a => a.matched > 0) ? 'all_candidates_rejected' : 'no_matching_selector',
+				roots: Object.fromEntries(roots.map(root => [root, $(root).length])),
+				attempts, priceNodes,
+			};
+			add('price_status', requiresCart ? 'price_requires_cart' : 'main_price_unavailable', 'buy-box', { priceDiagnostics });
 		}
 	} else {
 		let state;
