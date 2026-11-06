@@ -59,6 +59,8 @@ export default function AddProductModal({ isOpen, onClose, onAdd }: Props) {
           disabled={loading}
         />
 
+        {loading && <p role="status" className="mt-3 text-label text-muted-foreground">La verifica del prezzo può richiedere qualche istante.</p>}
+
         <div className="mt-6 flex justify-end gap-2">
           <Button variant="ghost" onClick={close} disabled={loading}>
             Annulla

@@ -13,6 +13,7 @@ const serverless = require('serverless-http');
 const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
 const { registerRoutes } = require('../../server/api/routes');
+const { dispatchImport } = require('../../server/services/importDispatch');
 
 dotenv.config();
 
@@ -23,6 +24,7 @@ app.use(express.json());
 app.get('/', (req, res) => res.send('Price Tracker API'));
 
 const apiLimiter = rateLimit({
+	skip: req => req.method === 'GET' && /^\/product-imports\//.test(req.path),
 	windowMs: 15 * 60 * 1000,
 	max: 100,
 	standardHeaders: true,
@@ -51,7 +53,9 @@ function getClient() {
 const router = express.Router();
 router.use(apiLimiter);
 router.post('/scrape', scrapeLimiter);
-registerRoutes({ getClient })(router);
+router.post('/products', scrapeLimiter);
+router.get('/product-imports/:id', rateLimit({ windowMs: 60000, max: 60 }));
+registerRoutes({ getClient, dispatchImport })(router);
 
 
 

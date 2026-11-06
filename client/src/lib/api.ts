@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { waitForImport, type ImportStatus } from './importPolling'
 
 const API_URL: string = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
 
@@ -20,13 +21,14 @@ export class ApiError extends Error {
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   body?: unknown
+  timeoutMs?: number
 }
 
 /**
  * Ogni chiamata porta il token di sessione: il server decide cosa scrivere,
  * il client non tocca piu' direttamente products e price_history.
  */
-async function request<T = Record<string, unknown>>(path: string, { method = 'GET', body }: RequestOptions = {}): Promise<T> {
+async function request<T = Record<string, unknown>>(path: string, { method = 'GET', body, timeoutMs }: RequestOptions = {}): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession()
 
   const response = await fetch(`${API_URL}${path}`, {
@@ -36,12 +38,13 @@ async function request<T = Record<string, unknown>>(path: string, { method = 'GE
       ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
+    ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
   })
 
   const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>
 
   if (!response.ok) {
-    throw new ApiError(typeof payload.error === 'string' ? payload.error : 'Request failed', response.status, payload)
+    throw new ApiError(typeof payload.error === 'string' ? payload.error : response.status === 504 ? 'Il server non ha risposto in tempo. Riprova tra poco.' : 'Richiesta non riuscita', response.status, payload)
   }
 
   return payload as T
@@ -61,12 +64,29 @@ export function scrapeProduct(url: string) {
 }
 
 /** Aggiunge un prodotto. La scrittura avviene sul server. */
-export function addProduct({ url, targetPrice = null, monitoringUntil = null }: {
+export async function addProduct({ url, targetPrice = null, monitoringUntil = null }: {
   url: string
   targetPrice?: number | null
   monitoringUntil?: string | null
 }) {
-  return request('/products', { method: 'POST', body: { url, targetPrice, monitoringUntil } })
+  const { data: { session } } = await supabase.auth.getSession()
+  const key = `price-tracker-import:${session?.user.id}:${JSON.stringify({ url, targetPrice, monitoringUntil })}`
+  let pending: { requestId: string; jobId?: string } = { requestId: crypto.randomUUID() }
+  try { pending = JSON.parse(sessionStorage.getItem(key) || 'null') || pending } catch { /* Storage can be disabled. */ }
+  const save = () => { try { sessionStorage.setItem(key, JSON.stringify(pending)) } catch { /* Keep the in-memory request. */ } }
+  save()
+  if (!pending.jobId) {
+    const queued = await request<{ jobId: string }>('/products', { method: 'POST', timeoutMs: 20000,
+      body: { url, targetPrice, monitoringUntil, requestId: pending.requestId, async: true } })
+    pending.jobId = queued.jobId
+    save()
+  }
+  const job = await waitForImport(pending.jobId, id => request<ImportStatus>(`/product-imports/${id}`, { timeoutMs: 10000 }))
+  try { sessionStorage.removeItem(key) } catch { /* Storage can be disabled. */ }
+  if (job.status === 'failed') {
+    throw new ApiError(job.error?.error || 'Aggiunta del prodotto fallita', job.error?.status || 500, job.error || {})
+  }
+  return job.result || {}
 }
 
 /** Aggiorna un prodotto adesso, con la stessa validazione del controllo automatico. */

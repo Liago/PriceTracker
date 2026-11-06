@@ -209,7 +209,7 @@ async function authenticate(req, client) {
  * @param {function} deps.getClient - () => client Supabase service_role
  * @returns {function} (router) => void
  */
-function registerRoutes({ getClient, scrapeImpl = scrapeProduct, checkUrlImpl = checkUrl }) {
+function registerRoutes({ getClient, scrapeImpl = scrapeProduct, checkUrlImpl = checkUrl, dispatchImport }) {
 	return function attach(router) {
 		// Il body JSON prima di tutto il resto. Su Netlify `express.json()` non
 		// lavora - serverless-http consegna una richiesta gia' completa e
@@ -255,48 +255,31 @@ function registerRoutes({ getClient, scrapeImpl = scrapeProduct, checkUrlImpl = 
 			const { user, error: authError } = await authenticate(req, client);
 			if (!user) return res.status(401).json({ error: authError });
 
-			const { url, targetPrice = null, monitoringUntil = null } = req.body || {};
-			const startedAt = Date.now();
+			if (req.body?.async === true || (dispatchImport && req.body?.async !== false)) {
+				try {
+					const jobs = require('../services/productImports');
+					const job = await jobs.enqueueImport(client, user.id, req.body);
+					if (dispatchImport) await dispatchImport(job.id).catch(error => console.warn('[Import dispatch]', error.message));
+					return res.status(202).json({ jobId: job.id, status: job.status });
+				} catch (error) {
+					return res.status(error.status || 500).json({ error: error.status ? error.message : 'Accodamento del prodotto fallito' });
+				}
+			}
+			return createProductRequest({ client, user, body: req.body, scrapeImpl, checkUrlImpl }, res);
+		});
 
+		router.get('/product-imports/:id', async (req, res) => {
+			const client = getClient();
+			const { user, error } = await authenticate(req, client);
+			if (!user) return res.status(401).json({ error });
 			try {
-				const policy = await checkUrlImpl(url);
-				if (!policy.allowed) {
-					return res.status(400).json({ error: `URL non ammesso: ${policy.reason}`, reason: policy.reason });
-				}
-
-				const recipes = createRecipeStore({ client });
-				const recipe = await recipes.getActiveRecipe(policy.url);
-				const scraped = await scrapeImpl(policy.url, { recipe, budgetMs: remainingBudget(startedAt) });
-				const data = normalizeScrapeResult(scraped, policy.url);
-
-				const reading = evaluatePrice({ scraped, product: { url: policy.url } });
-				if (!reading.validation.accepted) {
-					if (scraped.debug?.degraded) return respondIncomplete(res, { scraped });
-					return res.status(422).json({ error: 'Il prezzo della configurazione selezionata non è verificabile', code: 'LOW_CONFIDENCE',
-						confidence: reading.confidence, reasons: reading.validation.reasons, diagnostics: describeAttempt(scraped) });
-				}
-				if (targetPrice !== null && (!Number.isFinite(targetPrice) || targetPrice <= 0)) return res.status(400).json({ error: 'Prezzo obiettivo non valido' });
-				if (monitoringUntil !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(monitoringUntil) || !Number.isFinite(Date.parse(monitoringUntil)))) return res.status(400).json({ error: 'Data non valida' });
-				const product = await createTrackingRepository(client).createProduct({
-					product: { user_id: user.id, url: reading.descriptor.url || policy.url, canonical_url: scraped.canonicalUrl || policy.url,
-						domain: new URL(reading.descriptor.url || policy.url).hostname.replace(/^www\./, '').toLowerCase(),
-						name: data.title, image: data.image, description: data.description, current_price: reading.price,
-						currency: reading.currency, availability: reading.availability, target_price: targetPrice, monitoring_until: monitoringUntil,
-						store: data.store, brand: scraped.brand ?? null, sku: scraped.sku ?? null, gtin: scraped.gtin ?? null, details: data.details || {} },
-					descriptor: reading.descriptor, observation: { confidence: reading.confidence },
-				});
-
-				// Un dominio nuovo che si legge bene produce subito una ricetta.
-				if (!recipe && scraped.fields) {
-					const { recipe: learned } = learnRecipe(scraped, { url: policy.url });
-					if (learned) await recipes.saveLearnedRecipe(learned);
-				}
-
-				res.status(201).json({ product, confidence: scraped.confidence ?? null });
-			} catch (error) {
-				if (error.code === BUDGET_EXCEEDED) return respondIncomplete(res, { error });
-				console.error('[API] Aggiunta prodotto fallita:', error.message);
-				res.status(500).json({ error: 'Aggiunta del prodotto fallita' });
+				const result = await client.from('product_import_jobs').select('id,status,result,error').eq('id', req.params.id).eq('user_id', user.id).maybeSingle();
+				if (result.error) throw result.error;
+				if (!result.data) return res.status(404).json({ error: 'Richiesta non trovata' });
+				res.set?.('Cache-Control', 'no-store');
+				return res.json(result.data);
+			} catch {
+				return res.status(500).json({ error: 'Lettura dello stato fallita' });
 			}
 		});
 
@@ -463,4 +446,52 @@ function registerRoutes({ getClient, scrapeImpl = scrapeProduct, checkUrlImpl = 
 	};
 }
 
-module.exports = { registerRoutes, authenticate };
+
+/** Shared validation and persistence for synchronous and background additions. */
+async function createProductRequest({ client, user, body, scrapeImpl = scrapeProduct, checkUrlImpl = checkUrl, createProductImpl }, res) {
+	const { url, targetPrice = null, monitoringUntil = null } = body || {};
+	const startedAt = Date.now();
+
+	try {
+		const policy = await checkUrlImpl(url);
+		if (!policy.allowed) {
+			return res.status(400).json({ error: `URL non ammesso: ${policy.reason}`, reason: policy.reason });
+		}
+
+		const recipes = createRecipeStore({ client });
+		const recipe = await recipes.getActiveRecipe(policy.url);
+		const scraped = await scrapeImpl(policy.url, { recipe, budgetMs: remainingBudget(startedAt) });
+		const data = normalizeScrapeResult(scraped, policy.url);
+
+		const reading = evaluatePrice({ scraped, product: { url: policy.url } });
+		if (!reading.validation.accepted) {
+			if (scraped.debug?.degraded) return respondIncomplete(res, { scraped });
+			return res.status(422).json({ error: 'Il prezzo della configurazione selezionata non è verificabile', code: 'LOW_CONFIDENCE',
+				confidence: reading.confidence, reasons: reading.validation.reasons, diagnostics: describeAttempt(scraped) });
+		}
+		if (targetPrice !== null && (!Number.isFinite(targetPrice) || targetPrice <= 0)) return res.status(400).json({ error: 'Prezzo obiettivo non valido' });
+		if (monitoringUntil !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(monitoringUntil) || !Number.isFinite(Date.parse(monitoringUntil)))) return res.status(400).json({ error: 'Data non valida' });
+		const product = await (createProductImpl || createTrackingRepository(client).createProduct)({
+			product: { user_id: user.id, url: reading.descriptor.url || policy.url, canonical_url: scraped.canonicalUrl || policy.url,
+				domain: new URL(reading.descriptor.url || policy.url).hostname.replace(/^www\./, '').toLowerCase(),
+				name: data.title, image: data.image, description: data.description, current_price: reading.price,
+				currency: reading.currency, availability: reading.availability, target_price: targetPrice, monitoring_until: monitoringUntil,
+				store: data.store, brand: scraped.brand ?? null, sku: scraped.sku ?? null, gtin: scraped.gtin ?? null, details: data.details || {} },
+			descriptor: reading.descriptor, observation: { confidence: reading.confidence },
+		});
+
+		// Un dominio nuovo che si legge bene produce subito una ricetta.
+		if (!recipe && scraped.fields) {
+			const { recipe: learned } = learnRecipe(scraped, { url: policy.url });
+			if (learned) await recipes.saveLearnedRecipe(learned).catch(error => console.warn('[Recipe]', error.message));
+		}
+
+		res.status(201).json({ product, confidence: scraped.confidence ?? null });
+	} catch (error) {
+		if (error.code === BUDGET_EXCEEDED) return respondIncomplete(res, { error });
+		console.error('[API] Aggiunta prodotto fallita:', error.message);
+		res.status(500).json({ error: 'Aggiunta del prodotto fallita' });
+	}
+}
+
+module.exports = { registerRoutes, authenticate, createProductRequest };

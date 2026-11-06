@@ -3,6 +3,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { readFileSync, readdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import imports from '../../services/productImports.js';
 let db;
 const uid = '00000000-0000-0000-0000-000000000001';
 const one = async (sql, params=[]) => (await db.query(sql,params)).rows[0];
@@ -30,6 +31,59 @@ async function check(product, price=699, extra={}) {
  {domain:'shop.example',status:observation.accepted?'success':'quarantined',duration_ms:10,confidence:.9}])).result;
 }
 describe('tracking transactions on PostgreSQL',()=>{
+ it('keeps import infrastructure restricted to the service role and the migration repeatable',async()=>{
+  await db.exec(readFileSync(new URL('../../database/migrations/013_product_import_jobs.sql',import.meta.url),'utf8'));
+  const privileges=await one("select has_function_privilege('authenticated','public.claim_product_import(uuid)','execute') auth,has_function_privilege('anon','public.finish_product_import(uuid,uuid,jsonb,jsonb,jsonb)','execute') anon,has_function_privilege('service_role','public.enqueue_product_import(uuid,uuid,jsonb)','execute') service");
+  expect(privileges).toEqual({auth:false,anon:false,service:true});
+  expect((await one('select tracking_schema_version() version')).version).toBe(13);
+ });
+ it('runs a queued addition through shared validation into its atomic final result',async()=>{
+  const id=randomUUID();await one('select public.enqueue_product_import($1,$2,$3)',[id,uid,{url:'https://shop.example/phone'}]);
+  const chain={select(){return this},eq(){return this},then(resolve){return Promise.resolve(resolve({data:[],error:null}))}};
+  const client={from:()=>chain,rpc:async(name,args)=>{
+   try {
+    const row=name==='claim_product_import'
+     ? await one('select public.claim_product_import($1) data',[args.p_id])
+     : await one('select public.finish_product_import($1,$2,$3,$4,$5) data',[args.p_id,args.p_lease_id,args.p_product,args.p_offer,args.p_observation]);
+    return {data:row.data,error:null};
+   } catch(error){return {data:null,error:{message:error.message}}}
+  }};
+  await imports.processImport(client,id,{checkUrlImpl:async url=>({allowed:true,url}),scrapeImpl:async()=>({price:99,currency:'EUR',availability:'in_stock',confidence:.95,title:'Phone'})});
+  const job=await one('select * from product_import_jobs where id=$1',[id]);
+  expect(job.status).toBe('done');expect(job.result.product.current_price).toBe(99);expect(job.result.product.user_id).toBe(uid);
+  expect(await count('products')).toBe(1);expect(await count('price_history')).toBe(1);
+  await imports.processImport(client,id,{scrapeImpl:async()=>{throw Error('must not run twice')}});
+  expect(await count('products')).toBe(1);
+ });
+ it('deduplicates asynchronous additions, atomically saves the result and cannot create a second product on replay',async()=>{
+  const id=randomUUID(),request={url:'https://shop.example/phone',targetPrice:null,monitoringUntil:null};
+  const enqueue=async(id)=> (await one('select public.enqueue_product_import($1,$2,$3) j',[id,uid,request])).j;
+  const job=await enqueue(id);expect((await enqueue(id)).id).toBe(id);expect((await enqueue(randomUUID())).id).toBe(id);
+  const lease=(await one('select public.claim_product_import($1) j',[id])).j;
+  expect((await one('select public.claim_product_import($1) j',[id])).j).toBeNull();
+  const args=[id,lease.lease_id,{user_id:uid,url:request.url,name:'Phone',current_price:99,currency:'EUR',availability:'in_stock'},{offerKey:'default',url:request.url},{confidence:.95}];
+  const result=(await one('select public.finish_product_import($1,$2,$3,$4,$5) p',args)).p;
+  expect((await one('select public.finish_product_import($1,$2,$3,$4,$5) p',args)).p.id).toBe(result.id);
+  expect(await count('products')).toBe(1);expect(await count('price_history')).toBe(1);expect(await count('price_observations')).toBe(1);
+  const saved=await one('select status,result from product_import_jobs where id=$1',[id]);expect(saved.status).toBe('done');expect(saved.result.product.id).toBe(result.id);
+ });
+ it('rolls back an untrusted asynchronous addition and rejects an expired worker lease',async()=>{
+  const id=randomUUID();await one('select public.enqueue_product_import($1,$2,$3)',[id,uid,{url:'https://shop.example/phone'}]);
+  const lease=(await one('select public.claim_product_import($1) j',[id])).j;
+  const args=[id,lease.lease_id,{user_id:uid,url:'https://shop.example/phone',current_price:99},{offerKey:'default'},{confidence:.3}];
+  await expect(db.query('select public.finish_product_import($1,$2,$3,$4,$5)',args)).rejects.toThrow('Untrusted');
+  expect(await count('products')).toBe(0);expect((await one('select status from product_import_jobs where id=$1',[id])).status).toBe('running');
+  await db.query("update product_import_jobs set claimed_at=now()-interval '4 minutes' where id=$1",[id]);
+  const next=(await one('select public.claim_product_import($1) j',[id])).j;expect(next.lease_id).not.toBe(lease.lease_id);
+  await expect(db.query('select public.finish_product_import($1,$2,$3,$4,$5)',args)).rejects.toThrow('STALE_IMPORT_LEASE');
+ });
+ it('cannot reuse another user’s import request identifier or complete a job for another owner',async()=>{
+  const id=randomUUID();await one('select public.enqueue_product_import($1,$2,$3)',[id,uid,{url:'https://shop.example/phone'}]);
+  await expect(db.query('select public.enqueue_product_import($1,$2,$3)',[id,randomUUID(),{url:'https://shop.example/phone'}])).rejects.toThrow('IMPORT_REQUEST_CONFLICT');
+  const job=(await one('select public.claim_product_import($1) j',[id])).j;
+  await expect(db.query('select public.finish_product_import($1,$2,$3,$4,$5)',[id,job.lease_id,{user_id:randomUUID(),current_price:99},{offerKey:'default'},{confidence:.95}])).rejects.toThrow('IMPORT_OWNER_MISMATCH');
+  expect(await count('products')).toBe(0);
+ });
  it('creates product, pinned offer, first observation and first chart point together',async()=>{
   const p=await create();expect(p.primary_offer_id).toBeTruthy();expect(await count('price_history')).toBe(1);expect(await count('price_observations')).toBe(1);
  });

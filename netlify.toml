@@ -39,3 +39,6 @@
 
 [functions.email-worker]
   schedule = "*/2 * * * *"
+
+[functions.import-dispatcher]
+  schedule = "*/2 * * * *"

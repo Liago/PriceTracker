@@ -6,7 +6,7 @@ async function checkTrackingSchema(env = process.env, request = fetch) {
  const response=await request(`${env.SUPABASE_URL}/rest/v1/rpc/tracking_schema_version`,{
   method:'POST',headers:{apikey:key,Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:'{}',signal:AbortSignal.timeout(10000)
  });
- if (!response.ok || await response.json() !== 12) throw new Error('Prima del deploy applicare 012_tracking_reliability.sql: cd server && npm run migrate. Il deploy attuale resta utilizzabile.');
+ if (!response.ok || await response.json() !== 13) throw new Error('Prima del deploy applicare 012_tracking_reliability.sql e 013_product_import_jobs.sql: cd server && npm run migrate. Il deploy attuale resta utilizzabile.');
 }
 if (require.main === module) checkTrackingSchema().catch(error=>{console.error(error.message);process.exitCode=1});
 module.exports={checkTrackingSchema};

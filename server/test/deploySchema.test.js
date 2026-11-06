@@ -5,6 +5,7 @@ describe('deployment schema preflight',()=>{
  it('blocks deployment if required database migration is missing',async()=>{
   await expect(schema.checkTrackingSchema(env,async()=>({ok:false}))).rejects.toThrow('012_tracking_reliability.sql');
  });
- it('allows compatible databases',async()=>{await expect(schema.checkTrackingSchema(env,async()=>({ok:true,json:async()=>12}))).resolves.toBeUndefined()});
+ it('allows compatible databases',async()=>{await expect(schema.checkTrackingSchema(env,async()=>({ok:true,json:async()=>13}))).resolves.toBeUndefined()});
+ it('blocks a deployment on the previous tracking schema',async()=>{await expect(schema.checkTrackingSchema(env,async()=>({ok:true,json:async()=>12}))).rejects.toThrow('013_product_import_jobs.sql')});
  it('does not require production credentials for a local build',async()=>{const request=vi.fn();await schema.checkTrackingSchema({},request);expect(request).not.toHaveBeenCalled()});
 });

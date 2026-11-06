@@ -61,6 +61,7 @@ const { registerRoutes } = require('./api/routes');
 const rateLimit = require('express-rate-limit');
 
 const apiLimiter = rateLimit({
+	skip: req => req.method === 'GET' && /^\/product-imports\//.test(req.path),
 	windowMs: 15 * 60 * 1000,
 	max: 100,
 	standardHeaders: true,
@@ -87,7 +88,11 @@ function getClient() {
 const router = express.Router();
 router.use(apiLimiter);
 router.post('/scrape', scrapeLimiter);
-registerRoutes({ getClient })(router);
+router.post('/products', scrapeLimiter);
+router.get('/product-imports/:id', rateLimit({ windowMs: 60000, max: 60 }));
+registerRoutes({ getClient, dispatchImport: async id => {
+	setImmediate(() => require('./services/productImports').processImport(getClient(), id).catch(error => console.error('[Import]', error.message)));
+} })(router);
 
 app.use('/api', router);
 

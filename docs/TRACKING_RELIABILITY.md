@@ -1,6 +1,8 @@
 # Tracking reliability rollout
 
-This change requires `server/database/migrations/012_tracking_reliability.sql`.
+This change requires migrations `012_tracking_reliability.sql` and
+`013_product_import_jobs.sql` in `server/database/migrations/`.
+If 012 is already applied, only 013 is new.
 The Netlify build checks `tracking_schema_version()` before publishing the new code.
 Apply the migration before retrying a production build. The check prevents publishing
 code that would call RPCs absent from the current database.
@@ -16,7 +18,7 @@ npm run migrate:status
 npm run migrate
 ```
 
-Alternatively, run the contents of migration 012 in the Supabase SQL editor, inside
+Alternatively, run each new migration in order in the Supabase SQL editor, inside
 one transaction (`BEGIN;` / `COMMIT;`). If using the SQL editor, register the migration
 through the normal migration runner afterwards; the SQL is idempotent. Versions
 000–011 must already be present. Do not modify old migration files or expose database
@@ -116,3 +118,30 @@ diagnostics; it is an incomplete reading, not an invalid product configuration.
 The Zeiss B09K48BMV8 production failure had empty known price roots and no matching
 price nodes. Tests reproduce delayed price loading, but live recovery for that
 specific product must still be verified after deployment.
+
+## Asynchronous product additions (schema 13)
+
+Apply `013_product_import_jobs.sql` before deploying this version. The build
+preflight requires schema 13; the previous deployment keeps serving until then.
+No additional secret is needed: internal background invocations are signed using
+the existing service key and target the deployment URL supplied by Netlify.
+
+On the deployed API, `POST /products` now enqueues the addition and returns
+`202 {jobId,status}` before starting Chromium. The browser checks
+`GET /product-imports/:id` with the user's session; the endpoint only returns
+that user's job. Success contains the product, while a failed job retains the
+original validation reasons and extraction diagnostics. Explicit `async:false`
+retains the synchronous API for compatibility, with its platform/proxy limits.
+
+`product-import-background` performs the same URL policy, extraction and initial
+price validation as the synchronous route. Claim leases prevent concurrent work;
+product creation and the job result commit in one database transaction. Replaying
+a completed import cannot create another product. Client request IDs survive lost
+HTTP responses in session storage, so retrying the same addition resumes its job.
+`import-dispatcher` recovers pending and stale jobs every two minutes. Local Express
+starts the same processor outside the response; durable automatic recovery runs
+on Netlify. No product or price history is created for a rejected first reading.
+
+This removes the long silent connection responsible for intermediary inactivity
+timeouts during addition. It does not guarantee that a retailer will supply a
+verifiable price: those failures remain explicit results rather than HTML 504s.
