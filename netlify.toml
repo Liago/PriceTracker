@@ -8,9 +8,14 @@
 
 [build.environment]
   NODE_VERSION = "20"
-  # PROXY_DOMAINS e' un elenco di siti, non un segreto, e compare come esempio
-  # nella documentazione. PROXY_LIST (credenziali) resta soggetta alla scansione.
-  SECRETS_SCAN_OMIT_KEYS = "PROXY_DOMAINS"
+  # Valori pubblici per progetto, esclusi dalla scansione dei segreti:
+  # - URL di Supabase e chiave publishable (sb_publishable_), che Vite inserisce
+  #   nel bundle del browser: e' cosi' che il client si collega, la protezione
+  #   dei dati e' la RLS;
+  # - PROXY_DOMAINS, un elenco di siti che compare come esempio nei documenti.
+  # Restano scansionate le chiavi segrete (SUPABASE_KEY, SUPABASE_SERVICE_ROLE_KEY),
+  # PROXY_LIST e SMTP_PASS.
+  SECRETS_SCAN_OMIT_KEYS = "PROXY_DOMAINS,SUPABASE_URL,VITE_SUPABASE_URL,VITE_SUPABASE_KEY"
 
 [functions]
   node_bundler = "esbuild"
