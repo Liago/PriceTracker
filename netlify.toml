@@ -8,6 +8,9 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # PROXY_DOMAINS e' un elenco di siti, non un segreto, e compare come esempio
+  # nella documentazione. PROXY_LIST (credenziali) resta soggetta alla scansione.
+  SECRETS_SCAN_OMIT_KEYS = "PROXY_DOMAINS"
 
 [functions]
   node_bundler = "esbuild"
