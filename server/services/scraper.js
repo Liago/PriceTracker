@@ -67,6 +67,8 @@ const BROWSER_MIN_MS = parseInt(process.env.SCRAPE_BROWSER_MIN_MS || '8000', 10)
 // Tempo lasciato alla risposta dopo l'ultima lettura: chiusura del browser,
 // scritture, serializzazione.
 const RESPONSE_RESERVE_MS = parseInt(process.env.SCRAPE_RESPONSE_RESERVE_MS || '2500', 10);
+// Tetto all'attesa di una verifica Cloudflare che si risolve da sola.
+const CHALLENGE_WAIT_MS = parseInt(process.env.SCRAPE_CHALLENGE_WAIT_MS || '15000', 10);
 
 // Sotto questo tempo una navigazione non ha senso: si troncherebbe, e una
 // pagina troncata non e' un risultato ma un errore che costa quanto un
@@ -497,13 +499,47 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, create
 		// Interpretazione: nessuno store ha codice dedicato. Il browser serve
 		// solo a OTTENERE l'HTML; a leggerlo e' la pipeline generica, guidata
 		// dalla ricetta del dominio quando ce n'e' una.
-		const html = await page.content();
+		let html = await page.content();
 
 		// Un 403/429 sul documento e' un rifiuto, non una pagina senza prezzo.
 		// Se arriva anche al browser dopo la GET, il sito valuta l'indirizzo da
 		// cui leggiamo: cambiare User-Agent non serve, serve un altro IP.
-		const navigationStatus = typeof navigation?.status === 'function' ? navigation.status() : null;
+		//
+		// Con un'eccezione: la verifica di Cloudflare risponde 403 con una
+		// pagina il cui script, se la verifica passa, carica da solo la scheda.
+		// Scartarla subito toglieva al browser il tempo di finire quel caricamento;
+		// la si attende, con un tetto, come farebbe chi apre la pagina.
+		let navigationStatus = typeof navigation?.status === 'function' ? navigation.status() : null;
+		let challengeWaitMs = null;
+		const isChallenge = (response, content) => {
+			const headers = typeof response?.headers === 'function' ? response.headers() : {};
+			return headers['cf-mitigated'] === 'challenge' || /cdn-cgi\/challenge-platform|_cf_chl_opt|challenges\.cloudflare\.com/.test(content);
+		};
+		const challengeMarkers = content => /cdn-cgi\/challenge-platform|_cf_chl_opt|challenges\.cloudflare\.com/.test(content);
+		if (navigationStatus && ANTI_BOT_STATUSES.has(navigationStatus) && isChallenge(navigation, html) && !challengeMarkers(html)
+			&& Buffer.byteLength(html, 'utf8') > 5000) {
+			// La verifica si e' gia' risolta durante l'attesa del prodotto: la
+			// pagina e' un'altra, lo status della prima risposta non vale piu'.
+			console.log('[Scraper] Tier 1: verifica Cloudflare gia\' superata durante il caricamento');
+			navigationStatus = null;
+		}
+		if (navigationStatus && ANTI_BOT_STATUSES.has(navigationStatus) && isChallenge(navigation, html) && typeof page.waitForNavigation === 'function') {
+			const waitMs = Math.max(0, Math.min(CHALLENGE_WAIT_MS, deadline - Date.now() - RESPONSE_RESERVE_MS - NAVIGATION_MIN_MS));
+			const waitedFrom = Date.now();
+			if (waitMs > 1000) {
+				const next = await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: waitMs }).catch(() => null);
+				challengeWaitMs = Date.now() - waitedFrom;
+				if (next) {
+					navigation = next;
+					navigationStatus = typeof next.status === 'function' ? next.status() : null;
+					if (!ANTI_BOT_STATUSES.has(navigationStatus)) ({ budget: readinessBudget, timedOut: priceReadinessTimedOut } = await waitForProduct());
+					html = await page.content();
+				}
+				console.log(`[Scraper] Tier 1: verifica Cloudflare ${next && !ANTI_BOT_STATUSES.has(navigationStatus) ? `superata in ${challengeWaitMs}ms (HTTP ${navigationStatus})` : `non superata in ${challengeWaitMs}ms`}`);
+			}
+		}
 		if (navigationStatus && ANTI_BOT_STATUSES.has(navigationStatus)) {
+			const challenged = isChallenge(navigation, html);
 			const headers = typeof navigation.headers === 'function' ? navigation.headers() : {};
 			const blockVendor = headers['x-datadome'] || /datadome/i.test(headers['server'] || '') ? 'datadome'
 				: headers['cf-ray'] || /cloudflare/i.test(headers['server'] || '') ? 'cloudflare'
@@ -512,7 +548,8 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, create
 			console.warn(`[Scraper] Tier 1: il sito risponde ${navigationStatus} al browser (${blockVendor || 'protezione non identificata'}), ${Buffer.byteLength(html, 'utf8')} byte`);
 			const error = new Error(`BLOCKED_BY_SITE:${navigationStatus}`);
 			error.antiBotSuspected = true;
-			error.evidence = { httpStatus: navigationStatus, htmlBytes: Buffer.byteLength(html, 'utf8'), pageTitle: title || null, blockVendor, browserStartMs };
+			error.evidence = { httpStatus: navigationStatus, htmlBytes: Buffer.byteLength(html, 'utf8'), pageTitle: title || null, blockVendor,
+				challengeType: challenged ? 'cloudflare_challenge' : null, challengeWaitMs, browserStartMs };
 			throw error;
 		}
 
