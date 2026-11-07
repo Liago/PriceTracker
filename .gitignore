@@ -1,2 +1,7 @@
 server/node_modules/
 node_modules
+
+# Variabili locali: mai nel repository. Modelli in .env.example
+.env
+.env.*
+!.env.example
