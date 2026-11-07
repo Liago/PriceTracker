@@ -36,6 +36,7 @@ const { captchaDetector } = require('../utils/captchaDetector');
 const { resolveLocalExecutablePath } = require('../utils/browserPath');
 const { interpret } = require('../scrape');
 const { fetchHtml, ANTI_BOT_STATUSES } = require('../scrape/fetchHtml');
+const { needsProxy, markNeedsProxy, describeProxy } = require('../scrape/proxyRouting');
 const { detectInHtml } = require('../scrape/antiBot');
 const { productReady } = require('../scrape/browserReadiness');
 
@@ -288,8 +289,8 @@ function inspectResult(data, inspection) {
  * @param {object} context - { recipe, lastKnownPrice, timeoutMs, fetchHtmlImpl }
  * @returns {Promise<{data: object|null, skipped: string|null, antiBotSuspected: boolean, durationMs: number}>}
  */
-async function runTier0(url, { recipe, lastKnownPrice, timeoutMs, fetchHtmlImpl = fetchHtml, session = null }) {
-	const fetched = await fetchHtmlImpl(url, { timeoutMs, ...(session ? { session } : {}) });
+async function runTier0(url, { recipe, lastKnownPrice, timeoutMs, fetchHtmlImpl = fetchHtml, session = null, proxy = null }) {
+	const fetched = await fetchHtmlImpl(url, { timeoutMs, ...(session ? { session } : {}), ...(proxy ? { proxy } : {}) });
 
 	if (!fetched.ok) {
 		// Lo status fa la differenza fra «mi ha risposto 403» e «non ha risposto»,
@@ -357,9 +358,11 @@ async function runTier0(url, { recipe, lastKnownPrice, timeoutMs, fetchHtmlImpl 
  * @param {object} context
  * @returns {Promise<object>} risultato interpretato
  */
-async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, createBrowserImpl = createBrowser, session = null, sessions = null, sessionKey = null }) {
+async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, createBrowserImpl = createBrowser, session = null, sessions = null, sessionKey = null, useProxy = false }) {
 	let browser = null;
-	const proxy = proxyManager.hasProxies() ? proxyManager.getRandomProxy() : null;
+	// Il proxy solo dove serve: i siti che ci leggono direttamente non ne
+	// hanno bisogno, e la banda del proxy e' a consumo.
+	const proxy = useProxy && proxyManager.hasProxies() ? proxyManager.getRandomProxy() : null;
 
 	try {
 		// Get User-Agent for this request
@@ -372,7 +375,7 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, create
 		console.log(`[Scraper] Attempt ${attempt + 1}/${MAX_RETRIES} for ${url}`);
 		console.log(`[Scraper] Using User-Agent: ${userAgent.substring(0, 50)}...`);
 		if (proxy) {
-			console.log(`[Scraper] Using proxy: ${proxy.server}`);
+			console.log(`[Scraper] Browser tramite proxy ${describeProxy(proxy)}`);
 		}
 
 		// L'avvio di Chromium non e' istantaneo e va scontato dal budget: prima
@@ -959,7 +962,19 @@ async function scrapeProduct(url, options = {}) {
 		const timeoutMs = Math.min(TIER0_TIMEOUT_MS, Math.max(remaining(), 0));
 		if (timeoutMs > 0) {
 			try {
-				const tier0 = await runTier0(url, { ...context, timeoutMs, fetchHtmlImpl });
+				const viaProxy = proxyManager.hasProxies() && needsProxy(url);
+				let tier0 = await runTier0(url, { ...context, timeoutMs, fetchHtmlImpl, proxy: viaProxy ? proxyManager.getRandomProxy() : null });
+				// Un rifiuto alla lettura diretta, con un proxy disponibile: si
+				// riprova subito da li', prima di spendere secondi nel browser.
+				if (!tier0.data && tier0.antiBotSuspected && !viaProxy && proxyManager.hasProxies()) {
+					markNeedsProxy(url);
+					const retryMs = Math.min(TIER0_TIMEOUT_MS, Math.max(remaining(), 0));
+					if (retryMs > 1000) {
+						const proxy = proxyManager.getRandomProxy();
+						console.log(`[Scraper] Tier 0: riprovo tramite proxy ${describeProxy(proxy)}`);
+						tier0 = await runTier0(url, { ...context, timeoutMs: retryMs, fetchHtmlImpl, proxy });
+					}
+				}
 				tier0Skipped = tier0.skipped;
 				antiBotSuspected = tier0.antiBotSuspected;
 				evidence = tier0.evidence || null;
@@ -991,7 +1006,12 @@ async function scrapeProduct(url, options = {}) {
 	let lastError = null;
 	let browserAttempts = 0;
 
-	for (let attempt = 0; attempt < Math.min(MAX_RETRIES, Math.max(1, maxRetries + 1)); attempt++) {
+	// Un rifiuto diretto con un proxy disponibile vale un tentativo in piu',
+	// anche quando le impostazioni dell'utente non prevedono ripetizioni: non
+	// e' ripetere la stessa lettura, e' farla da un altro indirizzo.
+	let proxyEscalation = 0;
+	for (let attempt = 0; attempt < Math.min(MAX_RETRIES, Math.max(1, maxRetries + 1)) + proxyEscalation; attempt++) {
+		const useProxy = proxyManager.hasProxies() && needsProxy(url);
 		if (remaining() < browserBudgetNeeded()) {
 			console.warn(`[Scraper] Budget insufficiente per il browser (${remaining()}ms < ${browserBudgetNeeded()}ms)`);
 			// «Budget esaurito» dopo un tentativo e «budget insufficiente per
@@ -1007,7 +1027,7 @@ async function scrapeProduct(url, options = {}) {
 			browserAttempts++;
 			// Si passa la scadenza, non un timeout: quanto tempo resti davvero
 			// alla navigazione si sa solo dopo aver avviato il browser.
-			const data = await runTier1(url, { ...context, attempt, deadline });
+			const data = await runTier1(url, { ...context, attempt, deadline, useProxy });
 			return withDebug(data, { url, tier: 1, attempt: attempt + 1, startedAt, tier0Skipped, evidence });
 		} catch (error) {
 			lastError = error;
@@ -1017,7 +1037,17 @@ async function scrapeProduct(url, options = {}) {
 			if (error.antiBotSuspected) antiBotSuspected = true;
 			console.error(`[Scraper] Error on attempt ${attempt + 1}:`, error.message);
 
-			if (!isRetryable(error) || attempt >= MAX_RETRIES - 1) break;
+			const refused = error.message.includes('BLOCKED_BY_SITE') || error.message.includes('CAPTCHA_DETECTED');
+			if (refused && !useProxy && proxyManager.hasProxies()) {
+				markNeedsProxy(url);
+				if (!proxyEscalation) proxyEscalation = 1;
+				if (remaining() < browserBudgetNeeded()) break;
+				console.log('[Scraper] Rifiuto diretto: riprovo tramite proxy');
+				continue;
+			}
+			if (refused && useProxy) proxyManager.markCurrentAsFailed();
+
+			if (!isRetryable(error) || attempt >= MAX_RETRIES - 1 + proxyEscalation) break;
 
 			const delay = retryDelay(error, attempt);
 			if (remaining() - delay < browserBudgetNeeded()) {

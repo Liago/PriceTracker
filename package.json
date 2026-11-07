@@ -15,7 +15,8 @@
     "puppeteer-core": "^22.6.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "serverless-http": "^3.2.0"
+    "serverless-http": "^3.2.0",
+    "undici": "^7.19.1"
   },
   "scripts": {
     "build": "node scripts/check-tracking-schema.js && npm install --prefix client && npm run build --prefix client"

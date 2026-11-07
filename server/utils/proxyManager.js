@@ -34,11 +34,14 @@ class ProxyManager {
 					const url = new URL(proxy);
 					return {
 						server: `${url.protocol}//${url.hostname}:${url.port || 80}`,
-						username: url.username || undefined,
-						password: url.password || undefined,
+						// Le credenziali in un URL sono codificate: una password
+						// con caratteri speciali va decodificata per autenticarsi.
+						username: url.username ? decodeURIComponent(url.username) : undefined,
+						password: url.password ? decodeURIComponent(url.password) : undefined,
 					};
 				} catch (e) {
-					console.warn(`Invalid proxy URL: ${proxy}`);
+					// Mai l'URL nel log: contiene le credenziali.
+					console.warn('[ProxyManager] Proxy non valido in PROXY_LIST, ignorato');
 					return null;
 				}
 			}

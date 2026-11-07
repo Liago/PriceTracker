@@ -214,3 +214,17 @@ volta con `[Sessioni] Tabella retailer_sessions non disponibile`.
 
 Nei log: `Riuso la sessione amazon.it` all'inizio di una lettura e
 `Sessione amazon.it salvata (N cookie, scade …)` dopo un cambio di CAP.
+
+## Proxy per i siti che bloccano il server
+
+`PROXY_LIST` accetta il formato di Webshare, `http://utente:password@host:porta`
+(piu' proxy separati da virgola). Il proxy si usa solo dove serve:
+
+- domini in `PROXY_DOMAINS` (es. `backmarket.it,swappie.com`): sempre dal proxy;
+- un dominio che risponde 403/429 a una lettura diretta: la GET si riprova
+  subito dal proxy e, per sei ore nello stesso container, anche le letture
+  successive ci passano. Al browser rifiutato si concede un tentativo in piu'
+  dal proxy, anche con zero ripetizioni nelle impostazioni utente.
+
+Gli altri siti, Amazon compreso, restano diretti: la banda del proxy e' a
+consumo. Le credenziali non compaiono nei log, che riportano solo host e porta.

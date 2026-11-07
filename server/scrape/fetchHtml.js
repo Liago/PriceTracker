@@ -161,7 +161,10 @@ function decodeHtml(buffer, contentType) {
 async function fetchHtml(url, options = {}) {
 	const {
 		timeoutMs = DEFAULT_TIMEOUT_MS,
-		fetchImpl = fetch,
+		// Proxy da cui uscire: la politica sugli URL resta la stessa, cambia
+		// solo l'indirizzo che il sito vede.
+		proxy = null,
+		fetchImpl = proxy ? require('./proxyRouting').proxiedFetch(proxy) : fetch,
 		checkUrlImpl = checkUrl,
 		// Sessione del retailer (cookie e User-Agent emessi da lui): i cookie
 		// vanno solo agli host del suo dominio, rivalutati a ogni redirect.
