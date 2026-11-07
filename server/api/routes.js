@@ -86,6 +86,12 @@ const FAILURES = Object.freeze({
 		status: 502,
 		message: 'La scheda è stata caricata, ma il prezzo non è diventato disponibile nel tempo di attesa',
 	},
+	// Rifiuto per indirizzo: il sito risponde 403/429 sia alla GET sia al
+	// browser. Non e' un problema dell'URL ne' del budget.
+	sito_bloccato: {
+		status: 503,
+		message: 'Il negozio blocca le letture automatiche provenienti dal nostro server. Senza un proxy questo sito non è leggibile',
+	},
 	pagina_di_sfida: {
 		status: 503,
 		message: 'Il sito ha risposto con una verifica di sicurezza invece della pagina prodotto',
@@ -124,7 +130,8 @@ const DEFAULT_FAILURE = { status: 503, message: 'Non sono riuscito a leggere la 
 /** Il blocco a cui appartiene un motivo, tollerando i suffissi tipo `sfida_datadome`. */
 function classifyFailure(reason, antiBotSuspected) {
 	if (reason && FAILURES[reason]) return FAILURES[reason];
-	if (reason?.startsWith('sfida_') || reason?.startsWith('bloccato_dal_sito') || antiBotSuspected) {
+	if (reason?.startsWith('bloccato_dal_sito')) return FAILURES.sito_bloccato;
+	if (reason?.startsWith('sfida_') || antiBotSuspected) {
 		return FAILURES.pagina_di_sfida;
 	}
 	return DEFAULT_FAILURE;
@@ -183,6 +190,7 @@ function describeError(error) {
 		// il caso è affrontabile (un JS challenge che si risolve aspettando) o
 		// se è un blocco per indirizzo, dove nessuna regolazione aiuta.
 		challengeType: evidence.challengeType || null,
+		blockVendor: evidence.blockVendor || null,
 		challengeIndicators: evidence.challengeIndicators || null,
 		// Quando il motore sa quanto budget gli sarebbe servito, lo dice: e' un
 		// numero osservato, ed e' esattamente cio' che va in configurazione.

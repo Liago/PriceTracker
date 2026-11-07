@@ -35,7 +35,7 @@ const { createProxyManagerFromEnv } = require('../utils/proxyManager');
 const { captchaDetector } = require('../utils/captchaDetector');
 const { resolveLocalExecutablePath } = require('../utils/browserPath');
 const { interpret } = require('../scrape');
-const { fetchHtml } = require('../scrape/fetchHtml');
+const { fetchHtml, ANTI_BOT_STATUSES } = require('../scrape/fetchHtml');
 const { detectInHtml } = require('../scrape/antiBot');
 const { productReady } = require('../scrape/browserReadiness');
 
@@ -439,8 +439,11 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, create
 		// budget, non un valore fisso: un'attesa di trenta secondi dentro una
 		// function che ne vive dieci non e' un'attesa, e' un 504.
 		let navigationTimedOut = false;
+		// La risposta del documento: il suo status distingue «il sito ci
+		// rifiuta» da «la pagina e' vuota», che il solo HTML non dice.
+		let navigation = null;
 		try {
-			await page.goto(url, {
+			navigation = await page.goto(url, {
 				waitUntil: 'domcontentloaded',
 				timeout: navigationTimeoutMs,
 			});
@@ -495,6 +498,23 @@ async function runTier1(url, { recipe, lastKnownPrice, attempt, deadline, create
 		// solo a OTTENERE l'HTML; a leggerlo e' la pipeline generica, guidata
 		// dalla ricetta del dominio quando ce n'e' una.
 		const html = await page.content();
+
+		// Un 403/429 sul documento e' un rifiuto, non una pagina senza prezzo.
+		// Se arriva anche al browser dopo la GET, il sito valuta l'indirizzo da
+		// cui leggiamo: cambiare User-Agent non serve, serve un altro IP.
+		const navigationStatus = typeof navigation?.status === 'function' ? navigation.status() : null;
+		if (navigationStatus && ANTI_BOT_STATUSES.has(navigationStatus)) {
+			const headers = typeof navigation.headers === 'function' ? navigation.headers() : {};
+			const blockVendor = headers['x-datadome'] || /datadome/i.test(headers['server'] || '') ? 'datadome'
+				: headers['cf-ray'] || /cloudflare/i.test(headers['server'] || '') ? 'cloudflare'
+				: /akamai/i.test(`${headers['server'] || ''} ${Object.keys(headers).join(' ')}`) ? 'akamai' : (headers['server'] || null);
+			const title = detectInHtml(html).title;
+			console.warn(`[Scraper] Tier 1: il sito risponde ${navigationStatus} al browser (${blockVendor || 'protezione non identificata'}), ${Buffer.byteLength(html, 'utf8')} byte`);
+			const error = new Error(`BLOCKED_BY_SITE:${navigationStatus}`);
+			error.antiBotSuspected = true;
+			error.evidence = { httpStatus: navigationStatus, htmlBytes: Buffer.byteLength(html, 'utf8'), pageTitle: title || null, blockVendor, browserStartMs };
+			throw error;
+		}
 
 		// La stessa ispezione del tier 0, che qui mancava. Quando la navigazione
 		// va in timeout, page.content() restituisce comunque un documento: il
@@ -622,6 +642,9 @@ function challengeError(type, evidence) {
 
 /** L'errore giustifica un altro tentativo con browser? */
 function isRetryable(error) {
+	// Un rifiuto per indirizzo si ripete identico con ogni User-Agent: un altro
+	// tentativo ha senso solo se esce da un altro proxy.
+	if (error.message.includes('BLOCKED_BY_SITE')) return proxyManager.hasProxies();
 	return (
 		error.message.includes('CAPTCHA_DETECTED') ||
 		error.message.includes('EMPTY_PAGE') ||
@@ -954,6 +977,7 @@ async function scrapeProduct(url, options = {}) {
 			// Le prove raccolte dal browser sono piu' precise di quelle del tier
 			// 0: dicono cosa ha visto chi e' arrivato piu' avanti.
 			if (error.evidence) evidence = { ...evidence, ...error.evidence };
+			if (error.antiBotSuspected) antiBotSuspected = true;
 			console.error(`[Scraper] Error on attempt ${attempt + 1}:`, error.message);
 
 			if (!isRetryable(error) || attempt >= MAX_RETRIES - 1) break;
@@ -987,6 +1011,7 @@ function describeFailure(error) {
 	if (!error) return 'browser_fallito';
 	if (error.message.includes('STARTUP_ATE_BUDGET')) return 'budget_speso_nell_avvio';
 	if (error.message.includes('EMPTY_PAGE:')) return error.message.split('EMPTY_PAGE:')[1].split(':')[0];
+	if (error.message.includes('BLOCKED_BY_SITE:')) return `bloccato_dal_sito_${error.message.split('BLOCKED_BY_SITE:')[1].split(/\D/)[0]}`;
 	if (error.message.includes('CAPTCHA_DETECTED')) return 'pagina_di_sfida';
 	if (error.name === 'TimeoutError' || error.message.includes('Navigation timeout')) return 'navigazione_troncata';
 	return 'browser_fallito';

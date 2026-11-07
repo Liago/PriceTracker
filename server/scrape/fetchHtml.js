@@ -257,4 +257,4 @@ async function fetchHtml(url, options = {}) {
 	return { ok: false, reason: SKIP.REDIRECT_LOOP, url: current, durationMs: elapsed() };
 }
 
-module.exports = { fetchHtml, decodeHtml, readCapped, browserHeaders, SKIP, DEFAULT_TIMEOUT_MS };
+module.exports = { fetchHtml, decodeHtml, readCapped, browserHeaders, SKIP, DEFAULT_TIMEOUT_MS, ANTI_BOT_STATUSES };
