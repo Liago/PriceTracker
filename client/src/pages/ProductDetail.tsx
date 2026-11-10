@@ -223,11 +223,12 @@ export default function ProductDetail() {
         </div>
       </BlurFade>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-start">
-        {/* Immagine */}
-        <BlurFade delay={0.04}>
-          <Card className="group relative overflow-hidden">
-            <div className={cn('relative flex aspect-[4/3] items-center justify-center p-6 sm:aspect-[2/1] lg:aspect-square', hasImage ? 'bg-white' : 'bg-soft')}>
+      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        {/* Immagine: su desktop si allinea in altezza alla colonna di destra,
+            dal titolo fino al fondo delle card di prezzo e avviso. */}
+        <BlurFade delay={0.04} className="lg:h-full">
+          <Card className="group relative overflow-hidden lg:h-full lg:min-h-80">
+            <div className={cn('relative flex aspect-[4/3] items-center justify-center p-6 sm:aspect-[2/1] lg:absolute lg:inset-0 lg:aspect-auto', hasImage ? 'bg-white' : 'bg-soft')}>
               {hasImage ? (
                 <button
                   type="button"
@@ -481,8 +482,8 @@ function DetailSkeleton() {
   return (
     <div aria-busy="true" aria-label="Caricamento prodotto">
       <div className="h-5 w-40 animate-pulse rounded bg-soft" />
-      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-start">
-        <div className="aspect-[4/3] animate-pulse rounded-[14px] bg-soft sm:aspect-[2/1] lg:aspect-square" />
+      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        <div className="aspect-[4/3] animate-pulse rounded-[14px] bg-soft sm:aspect-[2/1] lg:aspect-auto lg:h-full" />
         <div className="space-y-4">
           <div className="h-6 w-24 animate-pulse rounded-full bg-soft" />
           <div className="h-10 w-full animate-pulse rounded bg-soft" />
