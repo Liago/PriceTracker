@@ -2,7 +2,7 @@ import { useLiveRefresh } from '../lib/useLiveRefresh'
 import { useState, useEffect, useRef, useCallback, type MouseEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Bell, Check, X } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import type { NotificationRow } from '../lib/types'
 import { formatDate, priceText } from '../lib/format'
@@ -16,6 +16,8 @@ import { cn } from '../lib/utils'
  * Il pannello si apre dall'angolo in alto a destra, cioè dal bottone
  * (transform-origin legato al trigger), in 150 ms; si chiude più in fretta.
  * Il conteggio dei non letti è in clay: è l'unica cosa da guardare qui.
+ * Ogni notifica mostra il prodotto e, se esiste ancora, porta alla sua pagina:
+ * il click la segna anche come letta e chiude il pannello.
  */
 export default function NotificationBell({ userId }: { userId: string }) {
   const [notifications, setNotifications] = useState<NotificationRow[]>([])
@@ -99,6 +101,11 @@ export default function NotificationBell({ userId }: { userId: string }) {
     }
   }
 
+  const openProduct = (notif: NotificationRow) => {
+    setIsOpen(false)
+    if (!notif.read) void markAsRead(notif.id)
+  }
+
   const handleReadAll = async () => {
     await supabase
       .from('notifications')
@@ -156,53 +163,88 @@ export default function NotificationBell({ userId }: { userId: string }) {
                 <p className="px-4 py-8 text-center text-muted-foreground">Nessuna notifica, per ora.</p>
               ) : (
                 <ul>
-                  {notifications.map((notif) => (
-                    <li
-                      key={notif.id}
-                      className={cn(
-                        'flex items-start gap-3 border-b border-border px-4 py-3 last:border-b-0',
-                        !notif.read && 'bg-soft',
-                      )}
-                    >
-                      <span
-                        className={cn('mt-2 h-2 w-2 shrink-0 rounded-full', notif.read ? 'bg-transparent' : 'bg-clay')}
-                        aria-hidden="true"
-                      />
-                      <div className="min-w-0 flex-1">
-                        {notif.type === 'price_drop' && (
-                          <Badge tone="good" className="mb-1">Calo di prezzo</Badge>
+                  {notifications.map((notif) => {
+                    const currency = notif.products?.currency || 'EUR'
+                    const productName = notif.products?.name || 'Prodotto sconosciuto'
+
+                    const content = (
+                      <>
+                        <span
+                          className={cn('mt-2 h-2 w-2 shrink-0 rounded-full', notif.read ? 'bg-transparent' : 'bg-clay')}
+                          aria-hidden="true"
+                        />
+                        {notif.products?.image && (
+                          <div className="h-12 w-12 shrink-0 overflow-hidden rounded-[8px] border border-border bg-white p-0.5">
+                            <img
+                              src={notif.products.image}
+                              alt=""
+                              loading="lazy"
+                              className="h-full w-full object-contain mix-blend-multiply"
+                            />
+                          </div>
                         )}
-                        <p className="text-body">
-                          Da <span className="tabular-nums text-muted-foreground">{notif.products?.currency || 'EUR'} {priceText(notif.old_price)}</span> a{' '}
-                          <strong className="font-semibold tabular-nums">{notif.products?.currency || 'EUR'} {priceText(notif.new_price)}</strong>
-                        </p>
-                        <span className="text-label text-subtle">{formatDate(notif.created_at)}</span>
-                      </div>
-                      <div className="flex shrink-0 gap-0.5">
-                        {!notif.read && (
+                        <div className="min-w-0 flex-1">
+                          {notif.type === 'price_drop' && (
+                            <Badge tone="good" className="mb-1">Calo di prezzo</Badge>
+                          )}
+                          <p className="truncate font-medium underline-offset-4 group-hover:underline" title={productName}>
+                            {productName}
+                          </p>
+                          <p className="text-body">
+                            Da <span className="tabular-nums text-muted-foreground">{currency} {priceText(notif.old_price)}</span> a{' '}
+                            <strong className="font-semibold tabular-nums">{currency} {priceText(notif.new_price)}</strong>
+                          </p>
+                          <span className="text-label text-subtle">{formatDate(notif.created_at)}</span>
+                        </div>
+                      </>
+                    )
+
+                    return (
+                      <li
+                        key={notif.id}
+                        className={cn(
+                          'flex items-start gap-1 border-b border-border px-2 py-2 last:border-b-0',
+                          !notif.read && 'bg-soft',
+                        )}
+                      >
+                        {notif.products ? (
+                          <Link
+                            to={`/product/${notif.product_id}`}
+                            onClick={() => openProduct(notif)}
+                            aria-label={`Apri ${productName}`}
+                            className="group flex min-w-0 flex-1 items-start gap-3 rounded-[10px] px-2 py-1 transition-colors duration-150 hover:bg-[color-mix(in_srgb,var(--foreground)_5%,transparent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                          >
+                            {content}
+                          </Link>
+                        ) : (
+                          <div className="flex min-w-0 flex-1 items-start gap-3 px-2 py-1">{content}</div>
+                        )}
+                        <div className="flex shrink-0 gap-0.5 pt-1">
+                          {!notif.read && (
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => markAsRead(notif.id)}
+                              title="Segna come letta"
+                              aria-label="Segna come letta"
+                            >
+                              <Check size={15} aria-hidden="true" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon-sm"
-                            onClick={() => markAsRead(notif.id)}
-                            title="Segna come letta"
-                            aria-label="Segna come letta"
+                            onClick={(e) => deleteNotification(notif.id, e)}
+                            title="Elimina"
+                            aria-label="Elimina notifica"
+                            className="hover:text-bad"
                           >
-                            <Check size={15} aria-hidden="true" />
+                            <X size={15} aria-hidden="true" />
                           </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={(e) => deleteNotification(notif.id, e)}
-                          title="Elimina"
-                          aria-label="Elimina notifica"
-                          className="hover:text-bad"
-                        >
-                          <X size={15} aria-hidden="true" />
-                        </Button>
-                      </div>
-                    </li>
-                  ))}
+                        </div>
+                      </li>
+                    )
+                  })}
                 </ul>
               )}
             </div>
