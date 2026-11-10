@@ -223,11 +223,11 @@ export default function ProductDetail() {
         </div>
       </BlurFade>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
+      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-start">
         {/* Immagine */}
         <BlurFade delay={0.04}>
           <Card className="group relative overflow-hidden">
-            <div className={cn('relative flex aspect-square items-center justify-center p-8 sm:aspect-[4/3] lg:aspect-square', hasImage ? 'bg-white' : 'bg-soft')}>
+            <div className={cn('relative flex aspect-[4/3] items-center justify-center p-6 sm:aspect-[2/1] lg:aspect-square', hasImage ? 'bg-white' : 'bg-soft')}>
               {hasImage ? (
                 <button
                   type="button"
@@ -267,7 +267,7 @@ export default function ProductDetail() {
 
         {/* Informazioni e prezzo */}
         <BlurFade delay={0.08}>
-          <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-5">
             <div>
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <Badge tone="neutral" className="uppercase tracking-wide">{product.store || 'Negozio sconosciuto'}</Badge>
@@ -276,7 +276,7 @@ export default function ProductDetail() {
                   {refreshing ? 'Aggiornamento…' : 'Aggiorna ora'}
                 </Button>
               </div>
-              <h1 className="font-serif text-title">{product.name}</h1>
+              <h1 className="font-serif text-title lg:line-clamp-3" title={product.name ?? undefined}>{product.name}</h1>
               {product.details?.variant && Object.keys(product.details.variant).length > 0 && (
                 <p className="mt-2 text-label text-muted-foreground">
                   Configurazione monitorata: {Object.entries(product.details.variant).map(([key, value]) =>
@@ -295,115 +295,116 @@ export default function ProductDetail() {
               </a>
             </div>
 
-            <Card>
-              <CardContent>
-                <p className="text-label text-muted-foreground">{product.tracking_health === 'healthy' ? 'Prezzo attuale' : 'Ultimo prezzo verificato'}</p>
+            {/* Prezzo e avviso affiancati: lasciano spazio alla scheda subito sotto */}
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card className="h-full">
+                <CardContent>
+                  <p className="text-label text-muted-foreground">{product.tracking_health === 'healthy' ? 'Prezzo attuale' : 'Ultimo prezzo verificato'}</p>
 
-                {refreshing ? (
-                  <div className="mt-2 flex flex-col gap-2" aria-hidden="true">
-                    <div className="h-10 w-48 animate-pulse rounded-[10px] bg-soft" />
-                    <div className="h-4 w-56 animate-pulse rounded bg-soft" />
-                  </div>
-                ) : availability.unavailable ? (
-                  <div className="mt-2 flex flex-wrap items-center gap-3">
-                    <span className="text-num font-medium whitespace-nowrap text-subtle tabular-nums line-through decoration-bad/60 decoration-2">
-                      {currency} {priceText(product.current_price)}
-                    </span>
-                    <Badge tone="bad">
-                      <AlertCircle size={13} aria-hidden="true" />
-                      {availability.label}
-                    </Badge>
-                  </div>
-                ) : (
-                  <div className="mt-2 flex flex-wrap items-center gap-3">
-                    <span className="text-num font-medium whitespace-nowrap">
-                      <span className="mr-1.5 align-baseline text-heading text-muted-foreground">{currency}</span>
-                      {currentPrice !== null ? (
-                        <NumberTicker
-                          value={currentPrice}
-                          decimalPlaces={decimalsOf(product.current_price)}
-                          startValue={Math.floor(currentPrice * 0.9)}
-                        />
-                      ) : '—'}
-                    </span>
-                    {availability.label && <Badge tone="watch">{availability.label}</Badge>}
-                    {atTarget && (
-                      <Badge tone="good">
-                        <Target size={13} aria-hidden="true" />
-                        Obiettivo raggiunto
-                      </Badge>
-                    )}
-                  </div>
-                )}
-
-                {/* Stato del tracking: distingue "prezzo fermo" da "non
-                    riesco piu' a leggere questa pagina". */}
-                <TrackingHealthBadge health={product.tracking_health} detail={trackingMessage(trackingReasons)} label={trackingLabel(trackingReasons)} className="mt-4" />
-
-                <div className="mt-3">
-                  <PriceFeedbackButton productId={product.id} currentPrice={product.current_price} />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Quando avvisarti</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <Label htmlFor="target-price">Prezzo obiettivo</Label>
-                    <div className="relative">
-                      <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-label font-medium text-subtle">
-                        {currency}
+                  {refreshing ? (
+                    <div className="mt-2 flex flex-col gap-2" aria-hidden="true">
+                      <div className="h-10 w-48 animate-pulse rounded-[10px] bg-soft" />
+                      <div className="h-4 w-56 animate-pulse rounded bg-soft" />
+                    </div>
+                  ) : availability.unavailable ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-3">
+                      <span className="text-num font-medium whitespace-nowrap text-subtle tabular-nums line-through decoration-bad/60 decoration-2">
+                        {currency} {priceText(product.current_price)}
                       </span>
-                      <Input
-                        id="target-price"
-                        type="number"
-                        step="0.01"
-                        inputMode="decimal"
-                        placeholder="0.00"
-                        value={targetPrice}
-                        onChange={(e) => setTargetPrice(e.target.value)}
-                        className={cn('tabular-nums', currency.length > 1 ? 'pl-14' : 'pl-8')}
-                      />
+                      <Badge tone="bad">
+                        <AlertCircle size={13} aria-hidden="true" />
+                        {availability.label}
+                      </Badge>
+                    </div>
+                  ) : (
+                    <div className="mt-2 flex flex-wrap items-center gap-3">
+                      <span className="text-num font-medium whitespace-nowrap">
+                        <span className="mr-1.5 align-baseline text-heading text-muted-foreground">{currency}</span>
+                        {currentPrice !== null ? (
+                          <NumberTicker
+                            value={currentPrice}
+                            decimalPlaces={decimalsOf(product.current_price)}
+                            startValue={Math.floor(currentPrice * 0.9)}
+                          />
+                        ) : '—'}
+                      </span>
+                      {availability.label && <Badge tone="watch">{availability.label}</Badge>}
+                      {atTarget && (
+                        <Badge tone="good">
+                          <Target size={13} aria-hidden="true" />
+                          Obiettivo raggiunto
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Stato del tracking: distingue "prezzo fermo" da "non
+                      riesco piu' a leggere questa pagina". */}
+                  <TrackingHealthBadge health={product.tracking_health} detail={trackingMessage(trackingReasons)} label={trackingLabel(trackingReasons)} className="mt-4" />
+
+                  <div className="mt-3">
+                    <PriceFeedbackButton productId={product.id} currentPrice={product.current_price} />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="h-full">
+                <CardContent>
+                  <p className="mb-3 text-label text-muted-foreground">Quando avvisarti</p>
+                  <div className="grid grid-cols-1 gap-3">
+                    <div>
+                      <Label htmlFor="target-price">Prezzo obiettivo</Label>
+                      <div className="relative">
+                        <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-label font-medium text-subtle">
+                          {currency}
+                        </span>
+                        <Input
+                          id="target-price"
+                          type="number"
+                          step="0.01"
+                          inputMode="decimal"
+                          placeholder="0.00"
+                          value={targetPrice}
+                          onChange={(e) => setTargetPrice(e.target.value)}
+                          className={cn('tabular-nums', currency.length > 1 ? 'pl-14' : 'pl-8')}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label htmlFor="monitor-until">Monitora fino al</Label>
+                      <div className="relative">
+                        <Calendar size={16} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-subtle" aria-hidden="true" />
+                        <Input
+                          id="monitor-until"
+                          type="date"
+                          value={monitoringUntil}
+                          onChange={(e) => setMonitoringUntil(e.target.value)}
+                          className="pl-9"
+                        />
+                      </div>
                     </div>
                   </div>
 
-                  <div>
-                    <Label htmlFor="monitor-until">Monitora fino al</Label>
-                    <div className="relative">
-                      <Calendar size={16} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-subtle" aria-hidden="true" />
-                      <Input
-                        id="monitor-until"
-                        type="date"
-                        value={monitoringUntil}
-                        onChange={(e) => setMonitoringUntil(e.target.value)}
-                        className="pl-9"
-                      />
-                    </div>
+                  <div className="mt-4 flex gap-2">
+                    <Button variant="main" onClick={handleSaveSettings} disabled={saving} className="flex-1 justify-center">
+                      {saving ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <Save size={18} aria-hidden="true" />}
+                      {saving ? 'Salvataggio…' : 'Salva'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setIsDeleteModalOpen(true)}
+                      title="Elimina prodotto"
+                      aria-label="Elimina prodotto"
+                      className="h-11 w-11 text-bad hover:border-bad hover:bg-bad-bg"
+                    >
+                      <Trash2 size={18} aria-hidden="true" />
+                    </Button>
                   </div>
-                </div>
-
-                <div className="mt-5 flex gap-2">
-                  <Button variant="main" onClick={handleSaveSettings} disabled={saving} className="flex-1 justify-center">
-                    {saving ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <Save size={18} aria-hidden="true" />}
-                    {saving ? 'Salvataggio…' : 'Salva'}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => setIsDeleteModalOpen(true)}
-                    title="Elimina prodotto"
-                    aria-label="Elimina prodotto"
-                    className="h-11 w-11 text-bad hover:border-bad hover:bg-bad-bg"
-                  >
-                    <Trash2 size={18} aria-hidden="true" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </div>
           </div>
         </BlurFade>
       </div>
@@ -480,8 +481,8 @@ function DetailSkeleton() {
   return (
     <div aria-busy="true" aria-label="Caricamento prodotto">
       <div className="h-5 w-40 animate-pulse rounded bg-soft" />
-      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
-        <div className="aspect-square animate-pulse rounded-[14px] bg-soft" />
+      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-start">
+        <div className="aspect-[4/3] animate-pulse rounded-[14px] bg-soft sm:aspect-[2/1] lg:aspect-square" />
         <div className="space-y-4">
           <div className="h-6 w-24 animate-pulse rounded-full bg-soft" />
           <div className="h-10 w-full animate-pulse rounded bg-soft" />
