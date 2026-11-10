@@ -408,6 +408,11 @@ export default function ProductDetail() {
         </BlurFade>
       </div>
 
+      {/* Scheda prodotto: descrizione, caratteristiche e specifiche, quando il negozio le espone */}
+      <BlurFade delay={0.04} inView>
+        <ProductInfoCard product={product} refreshing={refreshing} />
+      </BlurFade>
+
       {/* Price History Chart */}
       <BlurFade delay={0.12} inView>
         <Card className="mt-6">
@@ -418,11 +423,6 @@ export default function ProductDetail() {
             <PriceHistoryChart history={priceHistory} currency={currency} />
           </CardContent>
         </Card>
-      </BlurFade>
-
-      {/* Scheda prodotto: descrizione, caratteristiche e specifiche, quando il negozio le espone */}
-      <BlurFade delay={0.04} inView>
-        <ProductInfoCard product={product} refreshing={refreshing} />
       </BlurFade>
 
       <ConfirmationModal
