@@ -229,7 +229,7 @@ export default function ProductInfoCard({ product, refreshing = false }: { produ
 
                   {active === 'description' && (
                     <div>
-                      <p className="max-w-[72ch] leading-relaxed whitespace-pre-line">{visibleDescription}</p>
+                      <p className="w-full leading-relaxed break-words whitespace-pre-line">{visibleDescription}</p>
                       {longDescription && (
                         <Button
                           variant="ghost"
