@@ -28,6 +28,10 @@ function createTrackingRepository(client) {
 				p_expected_checked_at: product.last_checked_at ?? null,
 				p_offer: descriptor, p_observation: observation, p_patch: patch, p_run: run }), 'Salvataggio controllo');
 		},
+		/** Scheda prodotto: informazioni da mostrare, fuori dalla transazione del prezzo. */
+		async updateProductInfo({ product, patch }) {
+			return requireResult(await client.from('products').update(patch).eq('id', product.id), 'Aggiornamento scheda prodotto');
+		},
 	};
 }
 module.exports = { createTrackingRepository, requireResult };

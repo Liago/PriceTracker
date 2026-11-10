@@ -2,6 +2,7 @@ const { randomUUID } = require('crypto');
 const { evaluatePrice, descriptorOf, cents } = require('./evaluatePrice');
 const { nextTrackingHealth, OUTCOME, REJECT } = require('../scrape/score/validate');
 const { recordCheck } = require('../scrape/telemetry');
+const { productInfoPatch } = require('./productInfo');
 function confidenceOf(scraped) {
 	return { confidence: Number.isFinite(scraped?.confidence) ? scraped.confidence : 0, source: scraped?.fields?.price?.source ?? 'pipeline' };
 }
@@ -71,6 +72,12 @@ async function checkProduct({ product, scrape, repo, now = () => new Date() }) {
 			confidence, validation, error_message: scrapeError,
 			result: { price, currency, availability, offer: descriptor, diagnostics: diagnostics || scraped?.debug || null }, extractors_ran: scraped?.extractorsRan || [],
 			candidates: (scraped?.candidates || []).map(({ field, value, source, path, weight }) => ({ field, value, source, path, weight })) } });
+	// La scheda prodotto si aggiorna solo con una lettura accettata, e un suo
+	// errore non deve far fallire un controllo del prezzo gia' salvato.
+	if (validation.accepted && !scrapeError && typeof repo.updateProductInfo === 'function') {
+		const infoPatch = productInfoPatch(product, scraped, descriptor);
+		if (infoPatch) await repo.updateProductInfo({ product, patch: infoPatch }).catch(error => console.warn('[Scheda prodotto]', error.message));
+	}
 	recordCheck({ domain: product.domain, accepted: validation.accepted, confidence, source: confidenceOf(scraped).source, durationMs: Date.now() - startedAt.getTime(), reasons: validation.reasons });
 	return { productId: product.id, price, previousPrice, currency, availability, confidence, confidenceSource: confidenceOf(scraped).source,
 		accepted: validation.accepted, outcome: validation.outcome, reasons: validation.reasons, health: health.health,

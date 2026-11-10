@@ -10,8 +10,31 @@ export type Availability =
   | 'backorder'
   | 'unknown'
 
+export interface ProductSpec {
+  name: string
+  value: string
+  group?: string
+}
+
+export interface ProductRating {
+  value: number
+  count: number | null
+  best: number | null
+}
+
+/**
+ * Il JSON di `products.details`. Le informazioni della scheda prodotto sono
+ * lette dal server a ogni controllo riuscito e possono mancare tutte: le
+ * pagine dei negozi non le espongono sempre.
+ */
 export interface ProductDetails {
   features?: string[]
+  specs?: ProductSpec[]
+  rating?: ProductRating | null
+  breadcrumbs?: string[]
+  category?: string | null
+  seller?: string | null
+  condition?: string | null
   variant?: Record<string, string>
   [key: string]: unknown
 }
@@ -23,6 +46,9 @@ export interface Product {
   name: string | null
   image: string | null
   description?: string | null
+  brand?: string | null
+  sku?: string | null
+  gtin?: string | null
   store: string | null
   currency: string | null
   current_price: number | string | null

@@ -14,6 +14,7 @@ const { runPipeline } = require('./pipeline');
 const { detectPlatform } = require('./extract/platforms');
 const { describeOffer } = require('./normalize/offer');
 const { toLegacyBoolean } = require('./normalize/availability');
+const { extractProductInfo, bestDescription } = require('./extract/productInfo');
 
 /**
  * Interpreta l'HTML di una pagina prodotto.
@@ -33,12 +34,17 @@ function interpret(html, options = {}) {
 	const pipeline = runPipeline(doc, options);
 	const { platform } = detectPlatform(doc);
 	const offer = describeOffer(pipeline.result, url);
+	// La scheda prodotto e' solo da mostrare: un errore qui non tocca il prezzo.
+	let info = null;
+	try { info = extractProductInfo(doc, { title: pipeline.result.title ?? null }); } catch (e) { info = null; }
 
 	return {
 		// Campi piatti, nella forma che il resto dell'applicazione gia' usa.
 		title: pipeline.result.title ?? null,
 		image: pipeline.result.image ?? null,
-		description: pipeline.result.description ?? null,
+		// La descrizione della pipeline viene spesso dal meta tag, tagliata a
+		// 160 caratteri: quella della scheda, se piu' completa, la sostituisce.
+		description: bestDescription(pipeline.result.description, info?.description) ?? null,
 		price: pipeline.result.price ?? null,
 		priceValue: pipeline.result.price ?? null,
 		currency: pipeline.result.currency ?? null,
@@ -54,6 +60,11 @@ function interpret(html, options = {}) {
 			seller: pipeline.result.seller ?? null,
 			condition: pipeline.result.condition ?? null,
 			variant: pipeline.result.variant ?? {},
+			features: info?.features ?? [],
+			specs: info?.specs ?? [],
+			rating: info?.rating ?? null,
+			breadcrumbs: info?.breadcrumbs ?? [],
+			category: info?.category ?? null,
 		},
 
 		// Diagnostica: e' cio' che finira' in scrape_runs.

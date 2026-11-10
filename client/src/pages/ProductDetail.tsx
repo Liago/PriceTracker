@@ -10,6 +10,7 @@ import TrackingHealthBadge from '../components/TrackingHealthBadge'
 import PriceFeedbackButton from '../components/PriceFeedbackButton'
 import ConfirmationModal from '../components/ConfirmationModal'
 import PriceHistoryChart from '../components/PriceHistoryChart'
+import ProductInfoCard from '../components/ProductInfoCard'
 import { errorMessage, refreshProduct, getProductHealth, trackingMessage, trackingLabel } from '../lib/api'
 import type { PricePoint, PriceHistoryRow, Product } from '../lib/types'
 import { decimalsOf, formatDateTime, priceText, toNumber } from '../lib/format'
@@ -203,7 +204,6 @@ export default function ProductDetail() {
   const currentPrice = toNumber(product.current_price)
   const target = toNumber(product.target_price)
   const atTarget = currentPrice !== null && target !== null && currentPrice <= target
-  const features = product.details?.features ?? []
   const hasImage = Boolean(product.image) && !imageFailed
 
   return (
@@ -420,34 +420,10 @@ export default function ProductDetail() {
         </Card>
       </BlurFade>
 
-      {/* Caratteristiche */}
-      {(refreshing || features.length > 0) && (
-        <BlurFade delay={0.04} inView>
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle>Caratteristiche</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {refreshing ? (
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2" aria-hidden="true">
-                  {[...Array(4)].map((_, i) => (
-                    <div key={i} className="h-5 w-full animate-pulse rounded bg-soft" />
-                  ))}
-                </div>
-              ) : (
-                <ul className="grid grid-cols-1 gap-x-10 gap-y-3 md:grid-cols-2">
-                  {features.map((feature, index) => (
-                    <li key={index} className="flex gap-3 leading-relaxed">
-                      <span className="mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full bg-clay" aria-hidden="true" />
-                      <span>{feature}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-        </BlurFade>
-      )}
+      {/* Scheda prodotto: descrizione, caratteristiche e specifiche, quando il negozio le espone */}
+      <BlurFade delay={0.04} inView>
+        <ProductInfoCard product={product} refreshing={refreshing} />
+      </BlurFade>
 
       <ConfirmationModal
         isOpen={isDeleteModalOpen}
