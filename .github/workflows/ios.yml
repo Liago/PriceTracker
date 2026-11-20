@@ -1,0 +1,87 @@
+name: iOS
+
+on:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build e test
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Seleziona l'ultimo Xcode stabile
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+
+      - name: Risolvi i pacchetti Swift
+        run: xcodebuild -resolvePackageDependencies -project PriceTracker.xcodeproj -scheme PriceTracker
+
+      - name: Scegli un simulatore iPhone
+        id: simulator
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          runtimes = sorted((k for k in devices if "iOS" in k), key=lambda k: [int(p) for p in k.rsplit("iOS-", 1)[-1].split("-")])
+          for runtime in reversed(runtimes):
+              phones = [d for d in devices[runtime] if d["name"].startswith("iPhone")]
+              if phones:
+                  print(phones[0]["udid"]); break
+          ')
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl list devices available | grep "$UDID"
+
+      - name: Build e test
+        run: |
+          status=0
+          xcodebuild test \
+            -project PriceTracker.xcodeproj \
+            -scheme PriceTracker \
+            -destination "id=${{ steps.simulator.outputs.udid }}" \
+            -skipMacroValidation \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            > xcodebuild.log 2>&1 || status=$?
+          grep -E "error:|warning: .*/ios/PriceTracker|Test |\*\* " xcodebuild.log || true
+          exit $status
+
+      - name: Build Release per dispositivo
+        run: |
+          status=0
+          xcodebuild build \
+            -project PriceTracker.xcodeproj \
+            -scheme PriceTracker \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -skipMacroValidation \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            > xcodebuild-release.log 2>&1 || status=$?
+          grep -E "error:|\*\* " xcodebuild-release.log || true
+          exit $status
+
+      - name: Log di xcodebuild
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-logs
+          path: ios/xcodebuild*.log
