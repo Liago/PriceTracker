@@ -115,10 +115,39 @@ private struct LaunchView: View {
 /// Mostrata quando `Config/Secrets.xcconfig` manca o e' incompleto.
 struct ConfigurationMissingView: View {
     var body: some View {
-        ContentUnavailableView {
-            Label("Configurazione mancante", systemImage: "wrench.and.screwdriver")
-        } description: {
-            Text("Copia **Config/Secrets.example.xcconfig** in **Config/Secrets.xcconfig**, inserisci URL e chiave pubblica di Supabase e l'indirizzo delle API, poi ricompila l'app.")
+        ScrollView {
+            VStack(spacing: 24) {
+                ContentUnavailableView {
+                    Label("Configurazione mancante", systemImage: "wrench.and.screwdriver")
+                } description: {
+                    Text("Compila **ios/Config/Secrets.xcconfig** (copiandolo da Secrets.example.xcconfig), poi in Xcode fai Product › Clean Build Folder e ricompila.")
+                }
+
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(AppConfig.problems) { problem in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(problem.key, systemImage: "xmark.circle.fill")
+                                .font(.subheadline.weight(.semibold).monospaced())
+                                .foregroundStyle(.red)
+                            Text(problem.received.isEmpty ? "Valore ricevuto: vuoto" : "Valore ricevuto: \(problem.received)")
+                                .font(.footnote.monospaced())
+                                .foregroundStyle(.secondary)
+                            Text("Atteso, ad esempio: \(problem.hint)")
+                                .font(.footnote.monospaced())
+                                .foregroundStyle(.secondary)
+                        }
+                        .textSelection(.enabled)
+                    }
+                    Text("Negli URL scrivi https:/$()/ e non https://: nelle xcconfig \"//\" apre un commento e il resto della riga viene ignorato.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
+                .frame(maxWidth: 480, alignment: .leading)
+                .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 16, style: .continuous))
+                .padding(.horizontal)
+            }
+            .padding(.vertical, 40)
         }
     }
 }
