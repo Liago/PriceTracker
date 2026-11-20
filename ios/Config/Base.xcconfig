@@ -1,0 +1,16 @@
+// Configurazione comune dell'app.
+//
+// I valori reali vanno in Secrets.xcconfig (ignorato da git): copia
+// Secrets.example.xcconfig e compila i campi. Senza, l'app si avvia e mostra
+// la schermata "Configurazione mancante".
+
+APP_BUNDLE_ID = com.pricetracker.app
+APP_DISPLAY_NAME = PriceTracker
+MARKETING_VERSION = 1.0.0
+CURRENT_PROJECT_VERSION = 1
+
+SUPABASE_URL =
+SUPABASE_KEY =
+API_BASE_URL =
+
+#include? "Secrets.xcconfig"
