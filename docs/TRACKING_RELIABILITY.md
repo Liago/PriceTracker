@@ -47,10 +47,13 @@ are not automatically deleted: review them against a known product/variant first
   is distinct from email delivery. Additional drops already below the target do not
   create more target-crossing alerts.
 - Email delivery uses leases and recoverable retries, respects current preferences,
-  and never simulates success if SMTP is missing. Configure `SMTP_USER`/`SMTP_PASS`
-  (legacy `EMAIL_USER`/`EMAIL_PASS` are accepted), with optional host/port/from values.
-  SMTP delivery is at least once: a process killed after SMTP accepts a message but
-  before the sent marker is stored may retry it. A stable Message-ID aids diagnosis.
+  and never simulates success if no mail provider is configured. Resend is used when
+  `RESEND_API_KEY` is set (sender in `RESEND_FROM`, on a domain verified in Resend);
+  otherwise SMTP via `SMTP_USER`/`SMTP_PASS` (legacy `EMAIL_USER`/`EMAIL_PASS` are
+  accepted), with optional host/port/from values. `MAIL_PROVIDER=resend|smtp` forces one.
+  Resend requests carry an `Idempotency-Key` derived from the notification, so a retry
+  after a crash between acceptance and the sent marker does not send a duplicate.
+  SMTP delivery stays at least once; a stable Message-ID aids diagnosis.
 - Deferred jobs do not consume scrape attempts. Per-domain reservations coordinate
   workers and manual refreshes. Automatic jobs and local development share the queue.
 - Product screens and notification counters refresh on database events, focus and a
