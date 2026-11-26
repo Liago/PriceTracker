@@ -49,7 +49,7 @@ PriceTracker/
 
 ## Prerequisites
 
-- Node.js (v16 or higher)
+- Node.js (v22.18 or higher: the email services are TypeScript `.mts` files run via native type stripping; type-check with `npm run typecheck --prefix server`)
 - npm or yarn
 - Supabase account (free tier available)
 

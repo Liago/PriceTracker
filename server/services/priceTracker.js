@@ -24,7 +24,7 @@ async function checkProductPrices() {
 	const queued = await enqueueDueChecks({ client });
 	const result = await require('../../netlify/functions/worker').handler();
 	if (result.statusCode !== 200) throw new Error('Lotto di controllo non completato');
-	await require('./emailOutbox').deliverEmails(client);
+	await require('./emailOutbox.mts').deliverEmails(client);
 	return { ...queued, ...JSON.parse(result.body) };
 }
 module.exports = { checkProductPrices, enqueueDueChecks };
