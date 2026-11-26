@@ -49,7 +49,7 @@ PriceTracker/
 
 ## Prerequisites
 
-- Node.js (v16 or higher)
+- Node.js (v22.18 or higher: the email services are TypeScript `.mts` files run via native type stripping; type-check with `npm run typecheck --prefix server`)
 - npm or yarn
 - Supabase account (free tier available)
 
@@ -83,7 +83,13 @@ Create `.env` files in both `client` and `server` directories:
 PORT=3000
 SUPABASE_URL=your_supabase_url
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-# Optional: For Email Notifications (Gmail example)
+# Optional: Email Notifications via Resend (recommended)
+RESEND_API_KEY=re_xxxxxxxxx
+RESEND_FROM="PriceTracker <alerts@yourdomain.com>"   # domain verified on Resend
+# RESEND_REPLY_TO=support@yourdomain.com
+# MAIL_PROVIDER=resend                               # optional: force resend|smtp
+
+# Fallback: SMTP (used when RESEND_API_KEY is not set, Gmail example)
 EMAIL_USER=your_email@gmail.com
 EMAIL_PASS=your_app_password
 CLIENT_URL=http://localhost:5173

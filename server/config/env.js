@@ -13,6 +13,12 @@ const env = cleanEnv(process.env, {
 	EMAIL_USER: email({ default: '', desc: 'Email address for sending notifications' }),
 	EMAIL_PASS: str({ default: '', desc: 'Password or App Password for the email account' }),
 
+	// Resend (provider consigliato): se RESEND_API_KEY e' presente viene usato al posto di SMTP
+	MAIL_PROVIDER: str({ default: '', choices: ['', 'resend', 'smtp'], desc: 'Forza il provider email (vuoto = automatico)' }),
+	RESEND_API_KEY: str({ default: '', desc: 'API key di Resend (re_...)' }),
+	RESEND_FROM: str({ default: '', desc: 'Mittente, es. "PriceTracker <alerts@tuodominio.it>" (dominio verificato su Resend)' }),
+	RESEND_REPLY_TO: str({ default: '', desc: 'Indirizzo Reply-To opzionale' }),
+
 	// Client URL for CORS
 	CLIENT_URL: url({ default: 'http://localhost:5173', desc: 'The frontend client URL' }),
 

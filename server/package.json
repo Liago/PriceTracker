@@ -10,7 +10,8 @@
     "test:watch": "vitest",
     "migrate": "node database/migrate.js",
     "migrate:status": "node database/migrate.js --status",
-    "check:proxy": "node scripts/checkProxy.js"
+    "check:proxy": "node scripts/checkProxy.js",
+    "typecheck": "tsc -p tsconfig.json"
   },
   "keywords": [],
   "author": "",
@@ -36,8 +37,14 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.15",
+    "@types/node": "^22.20.7",
+    "@types/nodemailer": "^8.0.2",
     "jsdom": "^30.0.1",
     "nodemon": "^3.1.11",
+    "typescript": "~5.9.3",
     "vitest": "^4.1.11"
+  },
+  "engines": {
+    "node": ">=22.18"
   }
 }

@@ -1,5 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
-const { deliverEmails } = require('../../server/services/emailOutbox');
+const { deliverEmails } = require('../../server/services/emailOutbox.mts');
 module.exports.handler = async () => {
 	try {
 		const client = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);

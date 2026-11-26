@@ -1,0 +1,21 @@
+{
+  // Solo controllo dei tipi: i file .mts vengono eseguiti cosi' come sono
+  // (type stripping di Node >= 22.18, esbuild su Netlify, Vitest nei test).
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+    "noEmit": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "allowJs": true,
+    "checkJs": false,
+    "skipLibCheck": true
+  },
+  "include": ["services/**/*.mts", "test/**/*.mts"]
+}
